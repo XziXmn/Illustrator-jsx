@@ -389,7 +389,7 @@ if (typeof JSON !== "object") {
             "\t": "\\t",
             "\n": "\\n",
             "\f": "\\f",
-            "\r": "\\r",
+            "\r": "\r",
             "\"": "\\\"",
             "\\": "\\\\"
         };
@@ -540,7 +540,7 @@ if (app.documents.length == 0) {
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.1"; 
+    dialog.text = "云漫标记集 Ver 0.7.3.17"; 
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
@@ -585,7 +585,7 @@ var statictext1 = Markgroup_1.add("statictext", undefined, undefined, {name: "st
     statictext1.text = "大小："; 
 
 var markRadiusMMInput = Markgroup_1.add('edittext {properties: {name: "markRadiusMMInput"}}'); 
-    markRadiusMMInput.helpTip = "单位毫米"; 
+    markRadiusMMInput.helpTip = "单位毫米，最小4mm"; 
     markRadiusMMInput.text = 6; 
     markRadiusMMInput.preferredSize.width = 40; 
 
@@ -605,7 +605,7 @@ var statictext3 = Markgroup_2.add("statictext", undefined, undefined, {name: "st
     statictext3.text = "偏移："; 
 
 var offsetMMInput = Markgroup_2.add('edittext {properties: {name: "offsetMMInput"}}'); 
-    offsetMMInput.helpTip = "单位毫米"; 
+    offsetMMInput.helpTip = "单位毫米，最小0mm"; 
     offsetMMInput.text = 2; 
     offsetMMInput.preferredSize.width = 40; 
 
@@ -708,8 +708,10 @@ var AdaptiveArtboard = Panel_2.add("checkbox", undefined, undefined, {name: "Ada
     AdaptiveArtboard.value = true; 
 
 var whiteInkLayer = Panel_2.add("checkbox", undefined, undefined, {name: "whiteInkLayer"}); 
-    whiteInkLayer.helpTip = "是否添加白墨层，默认为添加。"; 
-    whiteInkLayer.text = "添加白墨图层"; 
+    whiteInkLayer.helpTip = "仅在启用冷烫标记后可选；白墨仅作为冷烫标记底色，不改变纸张/画板尺寸。"; 
+    whiteInkLayer.text = "添加白墨图层";
+    whiteInkLayer.value = false;
+    whiteInkLayer.enabled = false; 
 
 var PrintingColorSeparation = Panel_2.add("checkbox", undefined, undefined, {name: "PrintingColorSeparation"}); 
     PrintingColorSeparation.text = "添加印刷分色"; 
@@ -814,11 +816,17 @@ var cancel = buttongroup1.add("button", undefined, undefined, {name: "cancel"});
 
 doc = app.activeDocument;
 
-if (app.activeDocument.selection.length > 0) {
+// 记录脚本启动时是否以“选中对象”为目标。
+// 后续会取消对象选择，因此不能再依赖 doc.selection.length 判断该模式。
+var selectionMode = app.activeDocument.selection.length > 0;
+
+if (selectionMode) {
     dialog.text = dialog.text + "（已选中对象）";
     AdaptiveArtboard.enabled = false;
     AdaptiveArtboard.value = false;
     hotStampingMark.value = false;
+    whiteInkLayer.value = false;
+    whiteInkLayer.enabled = false;
 }
 
 var direction = {
@@ -843,11 +851,24 @@ positionDropdown.onChange = function(e) {
     }
 }
 
+// 白墨只服务于冷烫标记：未启用冷烫时不可选择，并强制取消勾选。
+hotStampingMark.onClick = function () {
+    if (hotStampingMark.value) {
+        whiteInkLayer.enabled = true;
+    } else {
+        whiteInkLayer.value = false;
+        whiteInkLayer.enabled = false;
+    }
+}
+
 FileInformation.onClick = function () {
     FileInformation.value ? Comment_text.enabled = true : Comment_text.enabled = false
 }
 Bisector.onClick = function () {
     Bisector.value ? Panel_3.enabled = true : Panel_3.enabled = false
+}
+Grating.onClick = function () {
+    if (Grating.value) lineWidthInput.text = "0.04";
 }
 var onClickCount = 0;
 statictext5.addEventListener('click', function() {
@@ -862,45 +883,143 @@ if (!Folder(exportFolder).exists) Folder(exportFolder).create();
 
 var storageFile = new File(exportFolder + "/ym_settings.json");
 
-var params = {
-    "verifyWhetherDocumentMonochrome" : false
-}
-if (storageFile.exists) {
-    storageFile.open("r");
-    var savedParams = JSON.parse(storageFile.read());
-    storageFile.close();
-    // 更新参数
-    lineWidthInput.enabled = savedParams.lineWidthInputEnabled;
-    params.verifyWhetherDocumentMonochrome = savedParams.verifyWhetherDocumentMonochrome;
-}
-// 确定按钮事件
-ok.onClick = function() {
-    if (markRadiusMMInput.text <= 5 || offsetMMInput.text <= 0 || isNaN(offsetMMInput.text) == true || isNaN(markRadiusMMInput.text) == true) {
-        alert("输入的标记大小必须大于5mm且偏移大于0mm！", "错误");
-    } else {
-        dialog.close(true);
+function logRuntimeWarning(message) {
+    try {
+        $.writeln("[云漫标记集] " + message);
+        return true;
+    } catch (e) {
+        return false;
     }
 }
 
+function closeFileSafely(file) {
+    try {
+        file.close();
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function loadStoredParams(file) {
+    if (!file.exists) return null;
+    try {
+        if (!file.open("r")) return null;
+        var raw = file.read();
+        file.close();
+        if (!raw) return null;
+        var parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (e) {
+        closeFileSafely(file);
+        logRuntimeWarning("设置文件读取失败，已使用默认设置：" + e.message);
+        return null;
+    }
+}
+
+function saveStoredParams(file, data) {
+    try {
+        if (!file.open("w")) return false;
+        file.write(JSON.stringify(data));
+        file.close();
+        return true;
+    } catch (e) {
+        closeFileSafely(file);
+        logRuntimeWarning("设置文件保存失败：" + e.message);
+        return false;
+    }
+}
+
+var params = {
+    "verifyWhetherDocumentMonochrome" : false,
+    "lineWidthInputEnabled" : lineWidthInput.enabled
+}
+var savedParams = loadStoredParams(storageFile);
+if (savedParams) {
+    // 更新参数
+    if (typeof savedParams.lineWidthInputEnabled === "boolean") {
+        lineWidthInput.enabled = savedParams.lineWidthInputEnabled;
+        params.lineWidthInputEnabled = savedParams.lineWidthInputEnabled;
+    }
+}
+
+function parseFiniteInput(text) {
+    var normalized = String(text).replace(/^\s+|\s+$/g, "");
+    if (!normalized) return null;
+    var value = Number(normalized);
+    return isFinite(value) ? value : null;
+}
+
+var validatedInputs = null;
+// 确定按钮事件
+ok.onClick = function() {
+    var markAreaMM = parseFiniteInput(markRadiusMMInput.text);
+    var offsetMM = parseFiniteInput(offsetMMInput.text);
+    var lineWidthMM = parseFiniteInput(lineWidthInput.text);
+    var horizontalCount = parseFiniteInput(horizontalDirection.text);
+    var verticalCount = parseFiniteInput(verticalDirection.text);
+    var horizontalSpaceMM = parseFiniteInput(spacing_1.text);
+    var verticalSpaceMM = parseFiniteInput(spacing_2.text);
+
+    if (markAreaMM === null || offsetMM === null || markAreaMM < 4 || offsetMM < 0) {
+        alert("输入的标记大小必须大于等于4mm且偏移大于等于0mm！", "错误");
+        return;
+    }
+    if (lineWidthMM === null || lineWidthMM <= 0) {
+        alert("线宽必须是大于0的数字！", "错误");
+        return;
+    }
+    if (horizontalCount === null || verticalCount === null
+        || horizontalCount < 1 || verticalCount < 1
+        || Math.floor(horizontalCount) !== horizontalCount
+        || Math.floor(verticalCount) !== verticalCount) {
+        alert("等分线的水平数和垂直数必须是大于等于1的整数！", "错误");
+        return;
+    }
+    if (horizontalSpaceMM === null || verticalSpaceMM === null
+        || horizontalSpaceMM < 0 || verticalSpaceMM < 0) {
+        alert("等分线间距必须是大于等于0的数字！", "错误");
+        return;
+    }
+
+    validatedInputs = {
+        markAreaMM: markAreaMM,
+        offsetMM: offsetMM,
+        lineWidthMM: lineWidthMM,
+        horizontalCount: horizontalCount,
+        verticalCount: verticalCount,
+        horizontalSpaceMM: horizontalSpaceMM,
+        verticalSpaceMM: verticalSpaceMM
+    };
+    dialog.close(true);
+}
+
 dialog.center();
-myReturn = dialog.show();
+var myReturn = dialog.show();
 if (myReturn == true) {
     var aiver = app.version;
+    var originalActiveLayer = doc.activeLayer;
+    var originalActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
     var pointTomm = 2.83464566929134;
-    var markArea = markRadiusMMInput.text * pointTomm; // 用户输入的大小
-    var markOffset = direction.value ? -((eval(markRadiusMMInput.text) + eval(offsetMMInput.text)) * pointTomm) : offsetMMInput.text * pointTomm; // 用户输入标记与画板间距
-    var strokeWidth = lineWidthInput.text * pointTomm; // 整体描边线条宽度
-    var registrationMarkWidth = lineWidthInput.text * pointTomm; // 套准标记线条宽度
-    var markSpacing = 35 * pointTomm; // 相邻标记间隔 设计为边的百分比大小
+    var markArea = validatedInputs.markAreaMM * pointTomm; // 用户输入的大小
+    var markOffset = direction.value
+        ? -((validatedInputs.markAreaMM + validatedInputs.offsetMM) * pointTomm)
+        : validatedInputs.offsetMM * pointTomm; // 用户输入标记与画板间距
+    var strokeWidth = validatedInputs.lineWidthMM * pointTomm; // 整体描边线条宽度
+    var registrationMarkWidth = validatedInputs.lineWidthMM * pointTomm; // 套准标记线条宽度
+    var markSpacing = 30 * pointTomm; // 冷烫标记相邻间距（毫米）
     var markRadius = markArea / 2; // 角线十字圆半径
     var reticleLength = markArea / 2; // 标记里十字线从相交点出发每端延伸的长度
-    var firstInterval = 8 * pointTomm; // 首尾偏移余量
-    var margin = markArea * 0.03; // 白底宽度余量
-    var stripWidth = markArea + margin; // 白底色块宽度
+    var margin = markArea * 0.03; // 白底沿标记排列方向的覆盖余量
+    var stripWidth = markArea; // 白底厚度与标记区域一致，不向纸张外缘额外扩展
     var compensation = markOffset + markRadius * 2; // 宽度补偿
 
     var documentColorSpace, documentMonochrome;
+    // 文档专色识别/专色名称输出当前不可用，统一暂停。
+    // 注意：冷烫白墨仍使用名为 White 的专色色板实现，不受此开关影响。
+    var documentSpotColorInfoEnabled = false;
     var fonts = app.textFonts; // 字体信息
+    var infoTextFont = getPreferredInfoFont(fonts);
     var fontSize = 9; // 字体大小
     var textHeight = 0; // 单位MM 字高
     var regRoundSize = 3.6 * pointTomm; // 四边套准圆大小
@@ -912,90 +1031,120 @@ if (myReturn == true) {
     var top = 0;
     var right = 0;
     var bottom = 0;
+    var regGroup, topMarksGroup, rightMarksGroup, bottomMarksGroup,
+        leftMarksGroup, cornerMarkGroup, textGroup, alignmentLineGroup;
+    var documentInformationTextContent, dimensionInformationTextContent;
 
     var spotColorBeingUsedSet = {}; // 文档中使用的专色信息
     var spotColorInfo = []; // 文档中存在的专色信息
 
+    // 冷烫信息布局异常统一收集，避免多画板时连续弹窗。
+    var layoutWarnings = [];
+    var currentLayoutContext = "";
+
     // 等分线参数
-    var hBisector = eval(horizontalDirection.text);
-    var vBisector = eval(verticalDirection.text);
-    var hBSpace = eval(spacing_1.text) * pointTomm;
-    var vBSpace = eval(spacing_2.text) * pointTomm;
+    var hBisector = validatedInputs.horizontalCount;
+    var vBisector = validatedInputs.verticalCount;
+    var hBSpace = validatedInputs.horizontalSpaceMM * pointTomm;
+    var vBSpace = validatedInputs.verticalSpaceMM * pointTomm;
     var mCMYK = [createCMYKColor(100, 0, 0, 0), createCMYKColor(0, 100, 0, 0), createCMYKColor(0, 0, 100, 0), createCMYKColor(0, 0, 0, 100)];
     
     // 获取文档颜色模式
     documentColorSpace = doc.documentColorSpace;
-    for (var i = 0, len = doc.spots.length; i < len; i++) {
-        // 套版色不存入
-        if ("[套版色]" != doc.spots[i].name) {
-            spotColorInfo.push(getSpotColorInfo(doc.spots[i]));
+    if (documentSpotColorInfoEnabled) {
+        for (var i = 0, len = doc.spots.length; i < len; i++) {
+            // 套版色不存入
+            if ("[套版色]" != doc.spots[i].name) {
+                spotColorInfo.push(getSpotColorInfo(doc.spots[i]));
+            }
         }
     }
 
-    var markLayerName = "标记图层"
+    var markLayerName = "标记图层";
     var markLayer = getLayerByName(markLayerName);
-    if (!markLayer) {
+    var layerWriteIssue = getLayerWriteIssue(markLayer);
+    if (!layerWriteIssue && whiteInkLayer.value && hotStampingMark.value) {
+        layerWriteIssue = getLayerWriteIssue(getLayerByName("白墨层"));
+    }
+    if (!layerWriteIssue && !markLayer) {
         markLayer = doc.layers.add();
         markLayer.name = markLayerName;
     }
-    doc.activeLayer = markLayer;
-
-    // 获取文档中的套版色
-    var processColors = doc.swatches[1].color;
-    // 调用单色判断,该方法一并将专色使用情况存储下来
-    documentMonochrome = isDocumentMonochrome();
-
-    if (doc.selection.length > 0) {
-        var obj = doc.selection;
-        var selVB = getBounds(obj);
-        var docName = "文件名: " + doc.name;
-        left = selVB[0]; //左
-        top = selVB[1]; // 上
-        right = selVB[2]; // 右
-        bottom = selVB[3]; // 下
-        pw = selVB[2] - selVB[0];
-        ph = selVB[1] - selVB[3];
-        x = selVB[0];
-        y = selVB[3];
-        for (var i = 0; i < obj.length; i++) {
-            obj[i].selected = false;
-        }
-        main();
-    } else if (aiver.slice(0, 2) >= 14) {
-        var ab = doc.artboards.length - 1;
-        if (ab >= 49) {
-            alert("注意:页面数量超过 50 时需要较多的内存与较长的运行时间，请耐心等候。\n当出现 \"PARM\"错误时，请关掉一些不用的软件以释放可用内存！", "提示");
-        }
-        for (var j = 0; j <= ab; j++) {
-            artboard = doc.artboards[j];
-            doc.artboards.setActiveArtboardIndex(j);
-            var rect = artboard.artboardRect;
-            var artboardnumber = doc.artboards.getActiveArtboardIndex() + 1;
-            var docName = "文件名: " + doc.name + "  页码: " + doc.artboards.length + "-" + artboardnumber;
-            left = rect[0]; //左
-            top = rect[1]; // 上
-            right = rect[2]; // 右
-            bottom = rect[3]; // 下
-            pw = doc.width;
-            ph = doc.height;
-            x = doc.cropBox[0];
-            y = doc.cropBox[1] - ph;
-            main();
-        }
-    } else {
-        pw = doc.width;
-        ph = doc.height;
-        var docName = "文件名: " + doc.name;
-        main();
+    if (layerWriteIssue) {
+        alert(layerWriteIssue + "\n请先显示并解锁该图层后重试。", "无法生成标记");
     }
 
-    params.verifyWhetherDocumentMonochrome = params.verifyWhetherDocumentMonochrome;
+    try {
+        if (!layerWriteIssue) {
+            doc.activeLayer = markLayer;
+
+            // 获取文档中的套版色
+            var processColors = doc.swatches[1].color;
+            // 文档专色信息暂停期间，不执行单色/专色使用情况扫描。
+            documentMonochrome = documentSpotColorInfoEnabled
+                ? isDocumentMonochrome()
+                : { isMonochrome: false, color: null };
+
+            if (doc.selection.length > 0) {
+                currentLayoutContext = "选中对象";
+                var obj = doc.selection;
+                var selVB = getBounds(obj);
+                var docName = "文件名: " + getDisplayFileName();
+                left = selVB[0]; //左
+                top = selVB[1]; // 上
+                right = selVB[2]; // 右
+                bottom = selVB[3]; // 下
+                pw = selVB[2] - selVB[0];
+                ph = selVB[1] - selVB[3];
+                x = selVB[0];
+                y = selVB[3];
+                for (var i = 0; i < obj.length; i++) {
+                    obj[i].selected = false;
+                }
+                main();
+            } else if (aiver.slice(0, 2) >= 14) {
+                var ab = doc.artboards.length - 1;
+                if (ab >= 49) {
+                    alert("注意:页面数量超过 50 时需要较多的内存与较长的运行时间，请耐心等候。\n当出现 \"PARM\"错误时，请关掉一些不用的软件以释放可用内存！", "提示");
+                }
+                for (var j = 0; j <= ab; j++) {
+                    var artboard = doc.artboards[j];
+                    doc.artboards.setActiveArtboardIndex(j);
+                    var rect = artboard.artboardRect;
+                    var artboardnumber = doc.artboards.getActiveArtboardIndex() + 1;
+                    currentLayoutContext = "画板 " + artboardnumber;
+                    var docName = "文件名: " + getDisplayFileName() + "  页码: " + doc.artboards.length + "-" + artboardnumber;
+                    left = rect[0]; //左
+                    top = rect[1]; // 上
+                    right = rect[2]; // 右
+                    bottom = rect[3]; // 下
+                    // 多画板必须使用当前画板自身尺寸。
+                    // doc.width/doc.height 在多画板文档中并不可靠，且前一个画板扩展后可能影响后续页面的布局判断。
+                    pw = right - left;
+                    ph = top - bottom;
+                    x = left;
+                    y = bottom;
+                    main();
+                }
+            } else {
+                currentLayoutContext = "当前画板";
+                pw = doc.width;
+                ph = doc.height;
+                var docName = "文件名: " + getDisplayFileName();
+                main();
+            }
+
+            showLayoutWarnings();
+        }
+    } finally {
+        restoreDocumentContext(doc, originalActiveLayer, originalActiveArtboardIndex);
+    }
+
+    params.verifyWhetherDocumentMonochrome = false;
     params.lineWidthInputEnabled = lineWidthInput.enabled;
 
     // 保存参数到本地文件
-    storageFile.open("w");
-    storageFile.write(JSON.stringify(params));
-    storageFile.close();
+    saveStoredParams(storageFile, params);
 }
 
 function main() {
@@ -1047,7 +1196,7 @@ function main() {
         }
     }
     
-    if (whiteInkLayer.value) {
+    if (whiteInkLayer.value && hotStampingMark.value) {
         var layerName = "白墨层";
         var newLayer = getLayerByName(layerName);
         if (!newLayer) {
@@ -1077,141 +1226,124 @@ function main() {
         colorname();
     }
     if (AdaptiveArtboard.value) {
-        if (whiteInkLayer.value) {
-            rect[0] -= markOffset + stripWidth; // 左边
-            rect[3] -= markOffset + stripWidth; // 下边
-            rect[1] += markOffset + stripWidth; // 上边
-            rect[2] += markOffset + stripWidth; // 右边
-            if (FileInformation.value || PrintingColorSeparation.value) {
-                if (hotStampingMark.value) {
-                    if (right - left > top - bottom) {
-                        rect[3] -= textHeight; // 下边
-                    } else {
-                        rect[0] -= textHeight; // 左边
-                    }
-                }
-            }
-        } else {
-            rect[0] -= markOffset + markArea; // 左边
-            rect[3] -= markOffset + markArea; // 下边
-            rect[1] += markOffset + markArea; // 上边
-            rect[2] += markOffset + markArea; // 右边
-            if (FileInformation.value || PrintingColorSeparation.value) {
-                if (hotStampingMark.value) {
-                    if (right - left > top - bottom) {
-                        rect[3] -= textHeight; // 下边
-                    } else {
-                        rect[0] -= textHeight; // 左边
-                    }
-                }
-            }
-
-        }
+        // 画板扩展只由标记最外缘决定；白墨始终限制在标记区域内，不参与尺寸计算。
+        rect[0] -= markOffset + markArea; // 左边
+        rect[3] -= markOffset + markArea; // 下边
+        rect[1] += markOffset + markArea; // 上边
+        rect[2] += markOffset + markArea; // 右边
         // 设置新的画板尺寸
         artboard.artboardRect = rect;
-        pw = doc.width;
-        ph = doc.height;
+        // 当前 main() 后续仍以本页为基准，避免多画板时 doc.width/doc.height 污染下一步判断。
+        pw = rect[2] - rect[0];
+        ph = rect[1] - rect[3];
         modifyTextFrame(textGroup, "dimensionInformationText", pagesize());
     }
 
 }
-// 创建识别标识
+// 创建识别标识：中点留给角线，向两边每 30mm 铺一颗，距扩展后边角不足 30mm 则停
 function createMark() {
-    // 标记数量
-    var maxNumber = 6;
-    // 添加顶部边缘的标记，按照从左到右的顺序
-    var numberCounter = 1;
-    for (var x = left + firstInterval + markArea; x < right - markArea; x += markSpacing) {
-        if (x !== left && x !== right - markArea) {
-            createMarkWithNumber("BandOne", x, top + markOffset + reticleLength, numberCounter, topMarksGroup, processColors);
-            numberCounter = (numberCounter % maxNumber) + 1;
-        }
-    }
-    // 添加底部边缘的标记，按照从右到左的顺序
-    numberCounter = 1;
-    for (var x = right - firstInterval - markArea; x > left + markArea; x -= markSpacing) {
-        if (x !== left && x !== right - markArea) {
-            createMarkWithNumber("BandOne", x, bottom - markOffset - reticleLength, numberCounter, bottomMarksGroup, processColors);
-            numberCounter = (numberCounter % maxNumber) + 1;
-        }
-    }
-    // 添加右侧边缘的标记，按照从上到下的顺序
-    numberCounter = 1;
-    for (var y = top - firstInterval - markArea; y > bottom + markArea; y -= markSpacing) {
-        if (y !== top && y !== bottom + markArea) {
-            createMarkWithNumber("Secondset", right + markOffset + reticleLength, y, numberCounter, rightMarksGroup, processColors);
-            numberCounter = (numberCounter % maxNumber) + 1;
-        }
-    }
-    // 添加左侧边缘的标记，按照从下到上的顺序
-    numberCounter = 1;
-    for (var y = bottom + firstInterval + markArea; y < top - markArea; y += markSpacing) {
-        if (y !== top && y !== bottom + markArea) {
-            createMarkWithNumber("Secondset", left - markOffset - reticleLength, y, numberCounter, leftMarksGroup, processColors);
-            numberCounter = (numberCounter % maxNumber) + 1;
-        }
-    }
-    // 居中
-    horizontallyCenterGroupToArtboard(topMarksGroup);
-    horizontallyCenterGroupToArtboard(bottomMarksGroup);
-    verticallyCenterGroupToArtboard(rightMarksGroup);
-    verticallyCenterGroupToArtboard(leftMarksGroup);
+    var midX = (left + right) / 2;
+    var midY = (top + bottom) / 2;
+    var expanded = getExpandedArtboardBounds();
+    placeHotStampMarksOnEdge(midX, top + markOffset + reticleLength, "h", expanded.left, expanded.right, topMarksGroup);
+    placeHotStampMarksOnEdge(midX, bottom - markOffset - reticleLength, "h", expanded.left, expanded.right, bottomMarksGroup);
+    placeHotStampMarksOnEdge(right + markOffset + reticleLength, midY, "v", expanded.bottom, expanded.top, rightMarksGroup);
+    placeHotStampMarksOnEdge(left - markOffset - reticleLength, midY, "v", expanded.bottom, expanded.top, leftMarksGroup);
 }
-// 辅助函数用于生成各样标记
-function createMarkWithNumber(g, x, y, number, group, color) {
-    switch (g) {
-        case "BandOne" :
-            switch (number) {
-                case 1:
-                    createSquareReticle(x, y, reticleLength * 0.88, reticleLength, group, color);
-                    break;
-                case 2:
-                    createRectangularReticle(x, y, reticleLength, reticleLength * 0.51, reticleLength, 0, group, color);
-                    break;
-                case 3:
-                    createCrosshairFourSideRightAngleShape(x, y, reticleLength * 0.33 , reticleLength * 0.85, reticleLength, group, color); 
-                    break;
-                case 4:
-                    createRectangularReticle(x, y, reticleLength * 0.51, reticleLength, reticleLength, 45, group, color);
-                    break;
-                case 5:
-                    createRectangularReticle(x, y, reticleLength * 0.51, reticleLength, reticleLength, 0, group, color);
-                    break;
-                case 6:
-                    createRectangularReticle(x, y, reticleLength * 0.51, reticleLength, reticleLength, 135, group, color);
-                    break;
-                default:
-                    alert("生成失败！")
-                    break;
-            }
+
+function getExpandedArtboardBounds() {
+    var extraLeft = 0;
+    var extraRight = 0;
+    var extraTop = 0;
+    var extraBottom = 0;
+    if (AdaptiveArtboard.value) {
+        var pad = markOffset + markArea; // 白墨不改变扩展范围
+        extraLeft = extraRight = extraTop = extraBottom = pad;
+    }
+    return {
+        left: left - extraLeft,
+        right: right + extraRight,
+        top: top + extraTop,
+        bottom: bottom - extraBottom
+    };
+}
+
+function collectOutwardPositions(mid, end) {
+    var tol = 0.05 * pointTomm;
+    var sign = end > mid ? 1 : -1;
+    var positions = [];
+    var step = 1;
+    while (step < 200) {
+        var p = mid + sign * step * markSpacing;
+        var remaining = (sign > 0) ? (end - p) : (p - end);
+        if (remaining + tol < markSpacing) break;
+        positions.push(p);
+        step++;
+    }
+    return positions;
+}
+
+function filterHotStampPositions(positions, cx, cy, axis) {
+    var out = [];
+    for (var i = 0; i < positions.length; i++) {
+        var mx = (axis === "h") ? positions[i] : cx;
+        var my = (axis === "h") ? cy : positions[i];
+        if (cuttingMark.value && isCoveredByCornerMark(mx, my)) continue;
+        out.push(positions[i]);
+    }
+    return out;
+}
+
+function getHotStampEdgePositions(cx, cy, axis, low, high) {
+    var mid = (axis === "h") ? cx : cy;
+    return {
+        low: filterHotStampPositions(collectOutwardPositions(mid, low), cx, cy, axis),
+        high: filterHotStampPositions(collectOutwardPositions(mid, high), cx, cy, axis)
+    };
+}
+
+function placeHotStampSequence(positions, cx, cy, axis, group) {
+    for (var i = 0; i < positions.length; i++) {
+        var mx = (axis === "h") ? positions[i] : cx;
+        var my = (axis === "h") ? cy : positions[i];
+        createMarkWithNumber(mx, my, (i % 2) + 1, group, processColors);
+    }
+}
+
+function placeHotStampMarksOnEdge(cx, cy, axis, low, high, group) {
+    var parts = getHotStampEdgePositions(cx, cy, axis, low, high);
+    placeHotStampSequence(parts.low, cx, cy, axis, group);
+    placeHotStampSequence(parts.high, cx, cy, axis, group);
+}
+
+function isCoveredByCornerMark(mx, my) {
+    var r = markRadius;
+    var cover = r + reticleLength;
+    var coverSq = cover * cover;
+    var corners = [
+        [left - markOffset - r, top + markOffset + r],
+        [right + markOffset + r, top + markOffset + r],
+        [left - markOffset - r, bottom - markOffset - r],
+        [right + markOffset + r, bottom - markOffset - r]
+    ];
+    for (var i = 0; i < corners.length; i++) {
+        var dx = mx - corners[i][0];
+        var dy = my - corners[i][1];
+        if (dx * dx + dy * dy < coverSq) return true;
+    }
+    return false;
+}
+// 1 = 圆十字，2 = 四角圆弧十字
+function createMarkWithNumber(x, y, number, group, color) {
+    switch (number) {
+        case 1:
+            createCircularReticle(x, y, (markArea / 4), reticleLength, group, color);
             break;
-        case "Secondset" :
-            switch (number) {
-                case 1:
-                    createCircularReticle(x, y, (markArea / 4), reticleLength, group, color);
-                    break;
-                case 2:
-                    createOvalReticle(x, y, markArea * 0.75, markArea / 2, reticleLength, 0, group, color);
-                    break;
-                case 3:
-                    createCircularReticleFourSidesArc(x, y, reticleLength * 0.33, reticleLength, group, color);
-                    break;
-                case 4:
-                    createOvalReticle(x, y, markArea / 2, markArea * 0.75, reticleLength, 0, group, color);
-                    break;
-                case 5: 
-                    createOvalReticle(x, y, markArea * 0.75, markArea / 2, reticleLength, 45, group, color);
-                    break;
-                case 6:
-                    createOvalReticle(x, y, markArea * 0.75, markArea / 2, reticleLength, 135, group, color);
-                    break;
-                default:
-                    alert("生成失败！")
-                    break;
-            }
+        case 2:
+            createCircularReticleFourSidesArc(x, y, reticleLength * 0.33, reticleLength, group, color);
             break;
         default:
-            alert("类型错误！")
+            alert("生成失败！");
             break;
     }
 }
@@ -1292,36 +1424,6 @@ function createCircularReticleFourSidesArc(x, y, offset, length, group, color) {
     horizontalLine.strokeWidth = registrationMarkWidth;
     horizontalLine.strokeColor = color;
 }
-// 椭圆十字线
-function createOvalReticle(x, y, ellipseWidth, ellipseHeight, length, angle, group, color) {
-    
-    var oval = group.pathItems.ellipse(y + ellipseHeight / 2, x - ellipseWidth / 2, ellipseWidth, ellipseHeight);
-
-    var verticalLine = group.pathItems.add();
-    verticalLine.setEntirePath([[x, y - length], [x, y + length]]);
-
-    var horizontalLine = group.pathItems.add();
-    horizontalLine.setEntirePath([[x - length, y], [x + length, y]]);
-
-    oval.stroked = true;
-    oval.strokeWidth = registrationMarkWidth;
-    oval.filled = false;
-    oval.strokeColor = color;
-
-    verticalLine.stroked = true;
-    verticalLine.filled = false;
-    verticalLine.strokeWidth = registrationMarkWidth;
-    verticalLine.strokeColor = color;
-
-    horizontalLine.stroked = true;
-    horizontalLine.filled = false;
-    horizontalLine.strokeWidth = registrationMarkWidth;
-    horizontalLine.strokeColor = color;
-
-    if (angle != 0) {
-        oval.rotate(angle, true, true, true, true, Transformation.CENTER);
-    }
-}
 // 圆形十字线
 function createCircularReticle(x, y, circleRadius, length, group, color) {
     
@@ -1347,133 +1449,6 @@ function createCircularReticle(x, y, circleRadius, length, group, color) {
     horizontalLine.filled = false;
     horizontalLine.strokeWidth = registrationMarkWidth;
     horizontalLine.strokeColor = color;
-}
-// 十字线四边直角形状
-function createCrosshairFourSideRightAngleShape(x, y, offset, fourSidesLength, length, group, color) {
-
-    // 绘制垂直线（穿过中心点）
-    var verticalLine =group.pathItems.add();
-    verticalLine.setEntirePath([[x, y - length], [x, y + length]]);
-
-    // 绘制水平线（穿过中心点）
-    var horizontalLine = group.pathItems.add();
-    horizontalLine.setEntirePath([[x - length, y], [x + length, y]]);
-    
-    // 绘制左上角
-    var topLeftCorner = group.pathItems.add();
-    topLeftCorner.setEntirePath([[x - fourSidesLength, y + offset], [x - offset, y + offset], [x - offset, y + fourSidesLength]]);
-    
-    // 绘制右上角
-    var topRightCorner = group.pathItems.add();
-    topRightCorner.setEntirePath([[x + offset, y + fourSidesLength], [x + offset, y + offset], [x + fourSidesLength, y + offset]]);
-
-    // 绘制左下角
-    var bottomLeftCorner = group.pathItems.add();
-    bottomLeftCorner.setEntirePath([[x - offset, y - fourSidesLength], [x - offset, y - offset], [x - fourSidesLength, y - offset]]);
-
-    // 绘制右下角垂直线
-    var bottomRightCorner = group.pathItems.add();
-    bottomRightCorner.setEntirePath([[x + offset, y - fourSidesLength], [x + offset, y - offset], [x + fourSidesLength, y - offset]]);
-
-    verticalLine.stroked = true;
-    verticalLine.filled = false;
-    verticalLine.strokeWidth = registrationMarkWidth;
-    verticalLine.strokeColor = color;
-
-    horizontalLine.stroked = true;
-    horizontalLine.filled = false;
-    horizontalLine.strokeWidth = registrationMarkWidth;
-    horizontalLine.strokeColor = color;
-
-    topLeftCorner.stroked = true;
-    topLeftCorner.filled = false;
-    topLeftCorner.strokeWidth = registrationMarkWidth;
-    topLeftCorner.strokeColor = color;
-
-    topRightCorner.stroked = true;
-    topRightCorner.filled = false;
-    topRightCorner.strokeWidth = registrationMarkWidth;
-    topRightCorner.strokeColor = color;
-
-    bottomLeftCorner.stroked = true;
-    bottomLeftCorner.filled = false;
-    bottomLeftCorner.strokeWidth = registrationMarkWidth;
-    bottomLeftCorner.strokeColor = color;
-
-    bottomRightCorner.stroked = true;
-    bottomRightCorner.filled = false;
-    bottomRightCorner.strokeWidth = registrationMarkWidth;
-    bottomRightCorner.strokeColor = color;
-}
-// 绘制正方形十字线
-function createSquareReticle(x, y, squareSize, length, group, color) {
-    
-    // 计算正方形左上角的坐标
-    var left = x - (squareSize / 2);
-    var top = y + (squareSize / 2);
-
-    // 绘制正方形
-    var square = group.pathItems.rectangle(top, left, squareSize, squareSize);
-
-    // 绘制垂直线（穿过中心点）
-    var verticalLine = group.pathItems.add();
-    verticalLine.setEntirePath([[x, y - length], [x, y + length]]);
-
-    // 绘制水平线（穿过中心点）
-    var horizontalLine = group.pathItems.add();
-    horizontalLine.setEntirePath([[x - length, y], [x + length, y]]);
-
-    verticalLine.stroked = true;
-    verticalLine.filled = false;
-    verticalLine.strokeWidth = registrationMarkWidth;
-    verticalLine.strokeColor = color;
-
-    horizontalLine.stroked = true;
-    horizontalLine.filled = false;
-    horizontalLine.strokeWidth = registrationMarkWidth;
-    horizontalLine.strokeColor = color;
-
-    square.stroked = true;
-    square.strokeWidth = registrationMarkWidth;
-    square.filled = false;
-    square.strokeColor = color;
-}
-// 绘制长方形十字线
-function createRectangularReticle(x, y, width, height, length, angle, group, color) {
-
-    // 计算正方形左上角的坐标
-    var left = x - (width / 2);
-    var top = y + (height / 2);
-
-    // 绘制长方形
-    var square = group.pathItems.rectangle(top, left, width, height);
-
-    // 绘制垂直线（穿过中心点）
-    var verticalLine = group.pathItems.add();
-    verticalLine.setEntirePath([[x, y - length], [x, y + length]]);
-
-    // 绘制水平线（穿过中心点）
-    var horizontalLine = group.pathItems.add();
-    horizontalLine.setEntirePath([[x - length, y], [x + length, y]]);
-    
-    verticalLine.stroked = true;
-    verticalLine.filled = false;
-    verticalLine.strokeWidth = registrationMarkWidth;
-    verticalLine.strokeColor = color;
-
-    horizontalLine.stroked = true;
-    horizontalLine.filled = false;
-    horizontalLine.strokeWidth = registrationMarkWidth;
-    horizontalLine.strokeColor = color;
-
-    square.stroked = true;
-    square.strokeWidth = registrationMarkWidth;
-    square.filled = false;
-    square.strokeColor = color;
-    
-    if (angle != 0) {
-        square.rotate(angle, true, true, true, true, Transformation.CENTER);
-    }
 }
 // 辅助函数用于生成实心圆和白色十字线标记
 function createCornerMark(x, y, radius, group) {
@@ -1640,71 +1615,75 @@ function regmark() {
     lineGroup.duplicate().position = [((pw - lineGroup.width) / 2) + x, ph + lineGroup.height + markOffset + y];
 }
 // 等分线
+// 所有等分线的横向/纵向端点与角线的最外边界严格一致：
+// 外侧模式 = 成品边界 ± (markOffset + markArea)；
+// 内侧模式因 markOffset 为负值，同一公式会自然落到成品内部。
+function createBisectorTick(group, x1, y1, x2, y2) {
+    var line = group.pathItems.add();
+    line.setEntirePath([[x1, y1], [x2, y2]]);
+    line.filled = false;
+    line.stroked = true;
+    line.strokeWidth = strokeWidth;
+    line.strokeColor = processColors;
+    return line;
+}
+
 function bisector() {
-    var lineGroup = doc.groupItems.add();
     var lineGroup = regGroup.groupItems.add();
-    if (vBSpace == 0) {
-        for (var vML = 1; vML < vBisector; vML += 1) {
+
+    // 与 createAngularLine / 外围标记使用同一套边界。
+    var leftOuter = x - markOffset - markArea;
+    var leftInner = x - markOffset;
+    var rightInner = x + pw + markOffset;
+    var rightOuter = x + pw + markOffset + markArea;
+    var bottomOuter = y - markOffset - markArea;
+    var bottomInner = y - markOffset;
+    var topInner = y + ph + markOffset;
+    var topOuter = y + ph + markOffset + markArea;
+
+    // 纵向等分：在左右两侧生成水平短线。
+    if (vBisector > 1) {
+        if (vBSpace == 0) {
             var vEquidistant = ph / vBisector;
-            var myLine1 = lineGroup.pathItems.add();
-            myLine1.setEntirePath([
-                [(x - markArea) - markOffset, y + (vML * vEquidistant)],
-                [x - markOffset, y + (vML * vEquidistant)]
-            ]);
-            myLine1.filled = false;
-            myLine1.stroked = true;
-            myLine1.strokeWidth = strokeWidth;
-            myLine1.strokeColor = processColors;
-            myLine1.duplicate().left = x + pw + markOffset;
-        }
-    } else {
-        for (var vML = 1; vML < vBisector; vML += 1) {
-            var vEquidistant = (ph + vBSpace) / vBisector;
-            var myLine1 = lineGroup.pathItems.add();
-            myLine1.setEntirePath([
-                [(x - markArea) - markOffset, y + (vML * vEquidistant)],
-                [x - markOffset, y + (vML * vEquidistant)]
-            ]);
-            myLine1.filled = false;
-            myLine1.stroked = true;
-            myLine1.strokeWidth = strokeWidth;
-            myLine1.strokeColor = processColors;
-            var myLine2 = myLine1.duplicate();
-            myLine2.position = [(x - markArea) - markOffset, (y - vBSpace) + (vML * vEquidistant)];
-            myLine1.duplicate().left = x + pw + markOffset;
-            myLine2.duplicate().left = x + pw + markOffset;
+            for (var vML = 1; vML < vBisector; vML += 1) {
+                var vPos = y + (vML * vEquidistant);
+                createBisectorTick(lineGroup, leftOuter, vPos, leftInner, vPos);
+                createBisectorTick(lineGroup, rightInner, vPos, rightOuter, vPos);
+            }
+        } else {
+            var vEquidistantGap = (ph + vBSpace) / vBisector;
+            for (var vMLGap = 1; vMLGap < vBisector; vMLGap += 1) {
+                var vPosA = y + (vMLGap * vEquidistantGap);
+                var vPosB = (y - vBSpace) + (vMLGap * vEquidistantGap);
+                createBisectorTick(lineGroup, leftOuter, vPosA, leftInner, vPosA);
+                createBisectorTick(lineGroup, leftOuter, vPosB, leftInner, vPosB);
+                createBisectorTick(lineGroup, rightInner, vPosA, rightOuter, vPosA);
+                createBisectorTick(lineGroup, rightInner, vPosB, rightOuter, vPosB);
+            }
         }
     }
-    if (hBSpace == 0) {
-        for (var hML = 1; hML < hBisector; hML += 1) {
+
+    // 横向等分：在上下两侧生成垂直短线。
+    // 旧版 hBSpace == 0 时底边使用了 1.5*markArea / 0.5*markArea，
+    // 会在默认 6mm 标记、2mm 偏移时比角线多伸出 1mm；这里统一改为精确边界。
+    if (hBisector > 1) {
+        if (hBSpace == 0) {
             var hEquidistant = pw / hBisector;
-            var myLine3 = lineGroup.pathItems.add();
-            myLine3.setEntirePath([
-                [x + (hML * hEquidistant), y - (1.5 * markArea)],
-                [x + (hML * hEquidistant), y - (0.5 * markArea)]
-            ]);
-            myLine3.filled = false;
-            myLine3.stroked = true;
-            myLine3.strokeWidth = strokeWidth;
-            myLine3.strokeColor = processColors;
-            myLine3.duplicate().top = y + ph + markOffset + markArea;
-        }
-    } else {
-        for (var hML = 1; hML < hBisector; hML += 1) {
-            var hEquidistant = (pw + hBSpace) / hBisector;
-            var myLine3 = lineGroup.pathItems.add();
-            myLine3.setEntirePath([
-                [(x + (hML * hEquidistant)) - hBSpace, y - markOffset],
-                [(x + (hML * hEquidistant)) - hBSpace, y - markArea - markOffset]
-            ]);
-            myLine3.filled = false;
-            myLine3.stroked = true;
-            myLine3.strokeWidth = strokeWidth;
-            myLine3.strokeColor = processColors;
-            var myLine4 = myLine3.duplicate();
-            myLine4.position = [x + (hML * hEquidistant), y - markOffset];
-            myLine4.duplicate().top = y + ph + markOffset + markArea;
-            myLine3.duplicate().top = y + ph + markOffset + markArea;
+            for (var hML = 1; hML < hBisector; hML += 1) {
+                var hPos = x + (hML * hEquidistant);
+                createBisectorTick(lineGroup, hPos, bottomOuter, hPos, bottomInner);
+                createBisectorTick(lineGroup, hPos, topInner, hPos, topOuter);
+            }
+        } else {
+            var hEquidistantGap = (pw + hBSpace) / hBisector;
+            for (var hMLGap = 1; hMLGap < hBisector; hMLGap += 1) {
+                var hPosA = (x + (hMLGap * hEquidistantGap)) - hBSpace;
+                var hPosB = x + (hMLGap * hEquidistantGap);
+                createBisectorTick(lineGroup, hPosA, bottomOuter, hPosA, bottomInner);
+                createBisectorTick(lineGroup, hPosB, bottomOuter, hPosB, bottomInner);
+                createBisectorTick(lineGroup, hPosA, topInner, hPosA, topOuter);
+                createBisectorTick(lineGroup, hPosB, topInner, hPosB, topOuter);
+            }
         }
     }
 }
@@ -1730,38 +1709,77 @@ function createBorderRectanglesInsideArtboard(rectangleGroup) {
     spotColor.spot = whiteInkSpot;
     spotColor.tint = 100;
 
-    if (PrintingCornerLine.value) {
-
-        // 上边左边
+    if (hotStampingMark.value) {
+        createWhiteInkByHotStampRange(rectangleGroup, spotColor);
+    } else if (PrintingCornerLine.value) {
         createRectangle(rectangleGroup, left + margin, top + stripWidth + markOffset, (right - left) / 2 - (markArea + markOffset + margin), stripWidth, spotColor);
-        // 上边右边
         createRectangle(rectangleGroup, left + (right - left) / 2 + (markArea + markOffset), top + stripWidth + markOffset, (right - left) / 2 - (markArea + markOffset + margin), stripWidth, spotColor);
-        // 下边左边
         createRectangle(rectangleGroup, left + margin, bottom - markOffset, (right - left) / 2 - (markArea + markOffset + margin), stripWidth, spotColor);
-        // 下边右边
         createRectangle(rectangleGroup, left + (right - left) / 2 + (markArea + markOffset), bottom - markOffset, (right - left) / 2 - (markArea + markOffset + margin), stripWidth, spotColor);
-        // 左边上边
         createRectangle(rectangleGroup, left - stripWidth - markOffset, top - margin, stripWidth, (top - bottom) / 2 - (markArea + markOffset + margin), spotColor);
-        // 左边下边
         createRectangle(rectangleGroup, left - stripWidth - markOffset, top - (top - bottom) / 2 - (markArea + markOffset), stripWidth, (top - bottom) / 2 - (markArea + markOffset + margin), spotColor);
-        // 右边上边
         createRectangle(rectangleGroup, right + markOffset, top - margin, stripWidth, (top - bottom) / 2 - (markArea + markOffset + margin), spotColor);
-        // 右边下边
         createRectangle(rectangleGroup, right + markOffset, top - (top - bottom) / 2 - (markArea + markOffset), stripWidth, (top - bottom) / 2 - (markArea + markOffset + margin), spotColor);
     } else {
-        // 上边
         createRectangle(rectangleGroup, left + margin, top + stripWidth + markOffset, right - left - margin * 2, stripWidth, spotColor);
-        // 下边
         createRectangle(rectangleGroup, left + margin, bottom - markOffset, right - left - margin * 2, stripWidth, spotColor);
-        // 左边
         createRectangle(rectangleGroup, left - stripWidth - markOffset, top - margin, stripWidth, top - bottom - margin * 2, spotColor);
-        // 右边
         createRectangle(rectangleGroup, right + markOffset, top - margin, stripWidth, top - bottom - margin * 2, spotColor);
     }
 
 }
+
+function getPositionRange(positions) {
+    if (!positions || positions.length === 0) return null;
+    var minP = positions[0];
+    var maxP = positions[0];
+    for (var i = 1; i < positions.length; i++) {
+        if (positions[i] < minP) minP = positions[i];
+        if (positions[i] > maxP) maxP = positions[i];
+    }
+    return { min: minP, max: maxP };
+}
+
+function addWhiteInkAlongPositions(axis, positions, stripLeft, stripTop, rectangleGroup, color) {
+    var range = getPositionRange(positions);
+    if (!range) return;
+    var pad = reticleLength + margin;
+    if (axis === "h") {
+        createRectangle(rectangleGroup, range.min - pad, stripTop, (range.max + pad) - (range.min - pad), stripWidth, color);
+    } else {
+        createRectangle(rectangleGroup, stripLeft, range.max + pad, stripWidth, (range.max + pad) - (range.min - pad), color);
+    }
+}
+
+function createWhiteInkByHotStampRange(rectangleGroup, spotColor) {
+    var midX = (left + right) / 2;
+    var midY = (top + bottom) / 2;
+    var expanded = getExpandedArtboardBounds();
+    var topY = top + markOffset + reticleLength;
+    var bottomY = bottom - markOffset - reticleLength;
+    var rightX = right + markOffset + reticleLength;
+    var leftX = left - markOffset - reticleLength;
+
+    var topParts = getHotStampEdgePositions(midX, topY, "h", expanded.left, expanded.right);
+    var bottomParts = getHotStampEdgePositions(midX, bottomY, "h", expanded.left, expanded.right);
+    var rightParts = getHotStampEdgePositions(rightX, midY, "v", expanded.bottom, expanded.top);
+    var leftParts = getHotStampEdgePositions(leftX, midY, "v", expanded.bottom, expanded.top);
+
+    addWhiteInkAlongPositions("h", topParts.low, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", topParts.high, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", bottomParts.low, 0, bottom - markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", bottomParts.high, 0, bottom - markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", leftParts.low, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", leftParts.high, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", rightParts.low, right + markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", rightParts.high, right + markOffset, 0, rectangleGroup, spotColor);
+}
 // 创建填充块
 function createRectangle(rectangleGroup, x, y, rectWidth, rectHeight, color) {
+    if (!isFinite(rectWidth) || !isFinite(rectHeight) || rectWidth <= 0 || rectHeight <= 0) {
+        addLayoutWarning("版面过小，已跳过无效的白墨区域。");
+        return null;
+    }
     var rect = rectangleGroup.pathItems.rectangle(y, x, rectWidth, rectHeight);
     rect.filled = true;
     rect.fillColor = color;
@@ -1784,8 +1802,924 @@ function verticallyCenterGroupToArtboard(group) {
     var deltaY = artboardCenterY - groupCenterY;
     group.translate(0, deltaY);
 }
-// 创建文档信息
+// 冷烫布局警告：同一条信息只记录一次，最后统一提示。
+function addLayoutWarning(message) {
+    var prefix = currentLayoutContext ? (currentLayoutContext + "：") : "";
+    var full = prefix + message;
+    for (var i = 0; i < layoutWarnings.length; i++) {
+        if (layoutWarnings[i] === full) return;
+    }
+    layoutWarnings.push(full);
+}
+
+function showLayoutWarnings() {
+    // 冷烫信息采用自动降级策略：文件名/尺寸/日期/备注都属于可省略信息，
+    // 不再因为正常的空间不足弹窗打断批量生成。
+    // 仅写入 ExtendScript 控制台，方便调试；生产使用时保持静默。
+    if (!layoutWarnings || layoutWarnings.length === 0) return;
+    try {
+        for (var i = 0; i < layoutWarnings.length; i++) {
+            $.writeln("[云漫标记集] " + layoutWarnings[i]);
+        }
+    } catch (e) {
+        logRuntimeWarning("布局警告输出失败：" + e.message);
+    }
+}
+
+// ========================== 冷烫信息自适应布局 v0.7.3 ==========================
+// 所有模式显示文件名时统一去除最后一个扩展名（.ai/.eps/.pdf 等）
+function getDisplayFileName() {
+    var name = doc.name;
+    var dotIndex = name.lastIndexOf(".");
+    if (dotIndex > 0) {
+        name = name.substring(0, dotIndex);
+    }
+    return name;
+}
+
+// 获取不带“日期:”标签的日期
+function getCompactDate() {
+    var today = new Date();
+    return today.getFullYear() + "-" + (today.getMonth() + 1) + "-" + today.getDate();
+}
+
+// 多画板沿用旧规则：总页数-当前页；单画板不显示页号
+function getCompactPageNumber() {
+    if (doc.artboards.length <= 1) return "";
+    return doc.artboards.length + "-" + (doc.artboards.getActiveArtboardIndex() + 1);
+}
+
+function round2(value) {
+    return Math.round(value * 100) / 100;
+}
+
+// 将点尺寸转换为紧凑尺寸文本，不带“尺寸:”标签
+function compactSizeFromPoints(widthPt, heightPt) {
+    var unit = "mm";
+    var sizeX = round2(widthPt / pointTomm);
+    var sizeY = round2(heightPt / pointTomm);
+
+    switch (doc.rulerUnits) {
+        case RulerUnits.Centimeters:
+            unit = "cm";
+            sizeX = round2((widthPt / pointTomm) / 10);
+            sizeY = round2((heightPt / pointTomm) / 10);
+            break;
+        case RulerUnits.Inches:
+            unit = "in";
+            sizeX = round2(widthPt / 72);
+            sizeY = round2(heightPt / 72);
+            break;
+        case RulerUnits.Millimeters:
+            unit = "mm";
+            sizeX = round2((widthPt / pointTomm) + 0.001);
+            sizeY = round2((heightPt / pointTomm) + 0.001);
+            break;
+        case RulerUnits.Points:
+            unit = "pt";
+            sizeX = round2(widthPt);
+            sizeY = round2(heightPt);
+            break;
+        case RulerUnits.Pixels:
+            unit = "px";
+            sizeX = round2(widthPt);
+            sizeY = round2(heightPt);
+            break;
+        case RulerUnits.Qs:
+            unit = "Ha";
+            sizeX = round2(widthPt * 1.41111);
+            sizeY = round2(heightPt * 1.41111);
+            break;
+    }
+    return sizeX + "×" + sizeY + unit;
+}
+
+// 判断当前是否存在会向成品边界外延伸的元素。
+function hasOutwardMarkElements() {
+    return hotStampingMark.value ||
+        cuttingMark.value ||
+        PrintingCornerLine.value ||
+        Grating.value ||
+        Bisector.value;
+}
+
+// 计算纸张/输出范围相对原始成品边界每一侧需要增加的尺寸。
+// 1. 自适应画板开启时，必须与最终扩展后的画板尺寸一致；
+// 2. 选中对象生成标记时虽然不会修改画板，但尺寸仍应反映标记实际占用的纸张范围；
+// 3. 手动关闭自适应画板但仍生成外侧标记时，同样显示实际纸张需求尺寸。
+function getOutputExpansionPad() {
+    if (direction.value) return 0;
+
+    var pad = 0;
+
+    // 纸张/输出尺寸只由标记最外缘决定。
+    // 白墨限定在 markArea 内，因此无论是否启用白墨，尺寸都完全一致。
+    if (AdaptiveArtboard.value || hasOutwardMarkElements()) {
+        pad = markOffset + markArea;
+    }
+
+    // 选中对象模式下 AdaptiveArtboard 会关闭，但 hasOutwardMarkElements()
+    // 仍会让尺寸反映对象外侧标记实际占用的纸张范围。
+    return Math.max(0, pad);
+}
+
+function getOutputSizePoints() {
+    var pad = getOutputExpansionPad();
+    return {
+        width: (right - left) + pad * 2,
+        height: (top - bottom) + pad * 2
+    };
+}
+
+// 冷烫模式显示最终纸张/扩展后尺寸，而不是原始成品尺寸。
+function getHotStampCompactSize() {
+    var outputSize = getOutputSizePoints();
+    return compactSizeFromPoints(outputSize.width, outputSize.height);
+}
+
+function makeInfoZone(l, t, r, b) {
+    return { left: l, top: t, right: r, bottom: b };
+}
+
+function zoneWidth(zone) {
+    return Math.max(0, zone.right - zone.left);
+}
+
+function zoneHeight(zone) {
+    return Math.max(0, zone.top - zone.bottom);
+}
+
+function getInfoGuard() {
+    return 0.10 * pointTomm;
+}
+
+function zoneUsableWidth(zone) {
+    if (!zone) return 0;
+    return Math.max(0, zoneWidth(zone) - getInfoGuard() * 2);
+}
+
+function zoneUsableHeight(zone) {
+    if (!zone) return 0;
+    return Math.max(0, zoneHeight(zone) - getInfoGuard() * 2);
+}
+
+function getOutermostPosition(list, lowSide) {
+    if (!list || list.length === 0) return null;
+    var value = list[0];
+    for (var i = 1; i < list.length; i++) {
+        if (lowSide) {
+            if (list[i] < value) value = list[i];
+        } else {
+            if (list[i] > value) value = list[i];
+        }
+    }
+    return value;
+}
+
+// 底边：low=左下角剩余区，high=右下角剩余区
+function getHotStampBottomInfoZones() {
+    // 信息必须同时避开冷烫标记和四角“印刷角线”。
+    // 角线的内侧边界落在原始画板 left/right 上，因此信息区不得继续使用
+    // left-markOffset / right+markOffset 作为端点，否则会穿过角线。
+    var safe = 1.5 * pointTomm;
+    var crossPad = 0.35 * pointTomm;
+    var midX = (left + right) / 2;
+    var cy = bottom - markOffset - reticleLength;
+    var expanded = getExpandedArtboardBounds();
+    var parts = getHotStampEdgePositions(midX, cy, "h", expanded.left, expanded.right);
+    var lowMark = getOutermostPosition(parts.low, true);
+    var highMark = getOutermostPosition(parts.high, false);
+
+    // 左右端严格收在原始画板角线以内。
+    var lowStart = left + safe;
+    var lowEnd = lowMark !== null ? lowMark - reticleLength - safe : midX - safe;
+    var highStart = highMark !== null ? highMark + reticleLength + safe : midX + safe;
+    var highEnd = right - safe;
+    var bandTop = bottom - markOffset - crossPad;
+    var bandBottom = bottom - markOffset - markArea + crossPad;
+
+    return {
+        low: makeInfoZone(lowStart, bandTop, Math.max(lowStart, lowEnd), bandBottom),
+        high: makeInfoZone(Math.min(highStart, highEnd), bandTop, highEnd, bandBottom)
+    };
+}
+
+// 顶边：low=左上角剩余区，high=右上角剩余区
+function getHotStampTopInfoZones() {
+    var safe = 1.5 * pointTomm;
+    var crossPad = 0.35 * pointTomm;
+    var midX = (left + right) / 2;
+    var cy = top + markOffset + reticleLength;
+    var expanded = getExpandedArtboardBounds();
+    var parts = getHotStampEdgePositions(midX, cy, "h", expanded.left, expanded.right);
+    var lowMark = getOutermostPosition(parts.low, true);
+    var highMark = getOutermostPosition(parts.high, false);
+
+    var lowStart = left + safe;
+    var lowEnd = lowMark !== null ? lowMark - reticleLength - safe : midX - safe;
+    var highStart = highMark !== null ? highMark + reticleLength + safe : midX + safe;
+    var highEnd = right - safe;
+    var bandTop = top + markOffset + markArea - crossPad;
+    var bandBottom = top + markOffset + crossPad;
+
+    return {
+        low: makeInfoZone(lowStart, bandTop, Math.max(lowStart, lowEnd), bandBottom),
+        high: makeInfoZone(Math.min(highStart, highEnd), bandTop, highEnd, bandBottom)
+    };
+}
+
+// 左边：low=左下角剩余区，high=左上角剩余区
+function getHotStampLeftInfoZones() {
+    var safe = 1.5 * pointTomm;
+    var crossPad = 0.35 * pointTomm;
+    var midY = (top + bottom) / 2;
+    var cx = left - markOffset - reticleLength;
+    var expanded = getExpandedArtboardBounds();
+    var parts = getHotStampEdgePositions(cx, midY, "v", expanded.bottom, expanded.top);
+    var lowMark = getOutermostPosition(parts.low, true);
+    var highMark = getOutermostPosition(parts.high, false);
+
+    // 上下端严格收在原始画板角线以内。
+    var lowStart = bottom + safe;
+    var lowEnd = lowMark !== null ? lowMark - reticleLength - safe : midY - safe;
+    var highStart = highMark !== null ? highMark + reticleLength + safe : midY + safe;
+    var highEnd = top - safe;
+    var bandLeft = left - markOffset - markArea + crossPad;
+    var bandRight = left - markOffset - crossPad;
+
+    return {
+        low: makeInfoZone(bandLeft, Math.max(lowStart, lowEnd), bandRight, lowStart),
+        high: makeInfoZone(bandLeft, highEnd, bandRight, Math.min(highStart, highEnd))
+    };
+}
+
+// 右边：low=右下角剩余区，high=右上角剩余区
+function getHotStampRightInfoZones() {
+    var safe = 1.5 * pointTomm;
+    var crossPad = 0.35 * pointTomm;
+    var midY = (top + bottom) / 2;
+    var cx = right + markOffset + reticleLength;
+    var expanded = getExpandedArtboardBounds();
+    var parts = getHotStampEdgePositions(cx, midY, "v", expanded.bottom, expanded.top);
+    var lowMark = getOutermostPosition(parts.low, true);
+    var highMark = getOutermostPosition(parts.high, false);
+
+    var lowStart = bottom + safe;
+    var lowEnd = lowMark !== null ? lowMark - reticleLength - safe : midY - safe;
+    var highStart = highMark !== null ? highMark + reticleLength + safe : midY + safe;
+    var highEnd = top - safe;
+    var bandLeft = right + markOffset + crossPad;
+    var bandRight = right + markOffset + markArea - crossPad;
+
+    return {
+        low: makeInfoZone(bandLeft, Math.max(lowStart, lowEnd), bandRight, lowStart),
+        high: makeInfoZone(bandLeft, highEnd, bandRight, Math.min(highStart, highEnd))
+    };
+}
+
+function getPreferredInfoFont(fontCollection) {
+    var preferredNames = ["MicrosoftYaHei", "MicrosoftYaHeiUI", "ArialMT"];
+    var lastError = null;
+    for (var i = 0; i < preferredNames.length; i++) {
+        try {
+            return fontCollection.getByName(preferredNames[i]);
+        } catch (e) {
+            lastError = e;
+        }
+    }
+    if (fontCollection.length > 0) return fontCollection[0];
+    throw new Error("当前 Illustrator 中没有可用字体。" + (lastError ? " " + lastError.message : ""));
+}
+
+function setupInfoTextFrame(frame, size) {
+    frame.textRange.characterAttributes.size = size;
+    frame.textRange.characterAttributes.textFont = infoTextFont;
+    frame.textRange.characterAttributes.fillColor = processColors;
+    frame.textRange.characterAttributes.leading = size * 1.02;
+}
+
+function frameFitsZone(frame, zone) {
+    var usableW = zoneUsableWidth(zone);
+    var usableH = zoneUsableHeight(zone);
+    if (usableW <= 0 || usableH <= 0) return false;
+
+    var vb = frame.visibleBounds;
+    var w = vb[2] - vb[0];
+    var h = vb[1] - vb[3];
+
+    // 与最终放置使用完全相同的 guard，避免“fit=true 但 place=false”导致文字被删除。
+    var tol = 0.01 * pointTomm;
+    return w <= Math.max(0, usableW - tol)
+        && h <= Math.max(0, usableH - tol);
+}
+
+function getFrameSize(frame) {
+    var vb = frame.visibleBounds;
+    return {
+        width: vb[2] - vb[0],
+        height: vb[1] - vb[3]
+    };
+}
+
+// 连续缩放字号；使用扣除 guard 后的真实可用宽高。
+function shrinkInfoFrameToZone(frame, zone, startSize, minSize) {
+    var usableW = zoneUsableWidth(zone);
+    var usableH = zoneUsableHeight(zone);
+    if (usableW <= 0 || usableH <= 0) return false;
+
+    var size = startSize;
+    setupInfoTextFrame(frame, size);
+
+    for (var i = 0; i < 24; i++) {
+        if (frameFitsZone(frame, zone)) return true;
+
+        var fs = getFrameSize(frame);
+        if (fs.width <= 0 || fs.height <= 0) return false;
+
+        var ratioW = usableW / fs.width;
+        var ratioH = usableH / fs.height;
+        var ratio = Math.min(ratioW, ratioH);
+        if (!isFinite(ratio) || ratio <= 0) return false;
+
+        // 留 3% 余量，避免 Illustrator 字体 bounds 的小数误差导致刚好压线。
+        var nextSize = size * ratio * 0.97;
+        if (nextSize >= size - 0.05) nextSize = size - 0.2;
+        if (nextSize < minSize) nextSize = minSize;
+
+        if (Math.abs(nextSize - size) < 0.01) break;
+        size = nextSize;
+        setupInfoTextFrame(frame, size);
+
+        if (size <= minSize + 0.01) break;
+    }
+
+    return frameFitsZone(frame, zone);
+}
+
+function frameInsideZone(frame, zone) {
+    if (!zone) return false;
+    var vb = frame.visibleBounds;
+    var guard = getInfoGuard();
+    // 多画板越靠后，页面项目的绝对坐标越大，Illustrator 返回的 visibleBounds
+    // 会出现极小的浮点舍入误差。放置函数本来就把文字贴在 guard 边界上，
+    // 因此复核时允许 0.03mm 数值误差，避免第二页以后被误判越界并删除。
+    var epsilon = 0.03 * pointTomm;
+    return vb[0] + epsilon >= zone.left + guard
+        && vb[2] - epsilon <= zone.right - guard
+        && vb[1] - epsilon <= zone.top - guard
+        && vb[3] + epsilon >= zone.bottom + guard;
+}
+
+function clampFrameInsideZone(frame, zone) {
+    if (!zone) return false;
+
+    var vb = frame.visibleBounds;
+    var guard = getInfoGuard();
+    var leftLimit = zone.left + guard;
+    var rightLimit = zone.right - guard;
+    var topLimit = zone.top - guard;
+    var bottomLimit = zone.bottom + guard;
+    var availableW = Math.max(0, rightLimit - leftLimit);
+    var availableH = Math.max(0, topLimit - bottomLimit);
+    var frameW = vb[2] - vb[0];
+    var frameH = vb[1] - vb[3];
+
+    // 如果几何尺寸本身已经超过可用区域，平移不可能解决，直接返回失败。
+    var sizeEps = 0.03 * pointTomm;
+    if (frameW > availableW + sizeEps || frameH > availableH + sizeEps) {
+        return false;
+    }
+
+    var dx = 0;
+    var dy = 0;
+
+    if (vb[0] < leftLimit) dx = leftLimit - vb[0];
+    if (vb[2] + dx > rightLimit) dx += rightLimit - (vb[2] + dx);
+    if (vb[1] > topLimit) dy = topLimit - vb[1];
+    if (vb[3] + dy < bottomLimit) dy += bottomLimit - (vb[3] + dy);
+
+    if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) frame.translate(dx, dy);
+    return frameInsideZone(frame, zone);
+}
+
+function placeFrameInZone(frame, zone, hAlign, vAlign) {
+    if (!zone) return false;
+
+    var vb = frame.visibleBounds;
+    var frameW = vb[2] - vb[0];
+    var frameH = vb[1] - vb[3];
+    var guard = getInfoGuard();
+    var usableLeft = zone.left + guard;
+    var usableRight = zone.right - guard;
+    var usableTop = zone.top - guard;
+    var usableBottom = zone.bottom + guard;
+    var usableW = Math.max(0, usableRight - usableLeft);
+    var usableH = Math.max(0, usableTop - usableBottom);
+
+    var sizeEps = 0.03 * pointTomm;
+    if (frameW > usableW + sizeEps || frameH > usableH + sizeEps) return false;
+
+    var targetLeft;
+    var targetTop;
+
+    if (hAlign === "right") targetLeft = usableRight - frameW;
+    else if (hAlign === "center") targetLeft = usableLeft + (usableW - frameW) / 2;
+    else targetLeft = usableLeft;
+
+    if (vAlign === "bottom") targetTop = usableBottom + frameH;
+    else if (vAlign === "center") targetTop = usableBottom + (usableH + frameH) / 2;
+    else targetTop = usableTop;
+
+    frame.translate(targetLeft - vb[0], targetTop - vb[1]);
+    return clampFrameInsideZone(frame, zone);
+}
+
+function middleEllipsis(text, keepChars) {
+    if (text.length <= keepChars) return text;
+    if (keepChars <= 3) return safePrefix(text, Math.max(1, keepChars - 1)) + "…";
+    var body = keepChars - 1;
+    var leftChars = Math.ceil(body * 0.65);
+    var rightChars = body - leftChars;
+    return safePrefix(text, leftChars) + "…" + safeSuffix(text, rightChars);
+}
+
+function isHighSurrogateCode(code) {
+    return code >= 0xD800 && code <= 0xDBFF;
+}
+
+function isLowSurrogateCode(code) {
+    return code >= 0xDC00 && code <= 0xDFFF;
+}
+
+function safePrefix(text, count) {
+    var end = Math.min(Math.max(0, count), text.length);
+    if (end > 0 && end < text.length) {
+        var prev = text.charCodeAt(end - 1);
+        var next = text.charCodeAt(end);
+        if (isHighSurrogateCode(prev) && isLowSurrogateCode(next)) end--;
+    }
+    return text.substring(0, end);
+}
+
+function safeSuffix(text, count) {
+    var start = Math.max(0, text.length - Math.max(0, count));
+    if (start > 0 && start < text.length) {
+        var current = text.charCodeAt(start);
+        var prev = text.charCodeAt(start - 1);
+        if (isLowSurrogateCode(current) && isHighSurrogateCode(prev)) start--;
+    }
+    return text.substring(start);
+}
+
+// 文件名缩写使用“前段……后段”的形式，但保留字符数不固定。
+// keepChars 表示省略号之外尽量保留的总字符数，左右尽量均分。
+// 同时避免把 emoji / 扩展字符的 UTF-16 代理对从中间截断。
+function compactFilenameAdaptive(filename, keepChars) {
+    if (!filename) return "";
+    if (keepChars >= filename.length) return filename;
+    if (keepChars < 2) keepChars = 2;
+
+    var leftChars = Math.ceil(keepChars / 2);
+    var rightChars = Math.floor(keepChars / 2);
+    return safePrefix(filename, leftChars)
+        + "……"
+        + safeSuffix(filename, rightChars);
+}
+
+// 文件名特别长时，允许文件名自身拆成两行；尺寸仍完整独占最后一行。
+function splitFilenameNearMiddle(filename) {
+    if (!filename || filename.length < 6) return null;
+    var mid = Math.floor(filename.length / 2);
+    var split = mid;
+    var bestDistance = filename.length;
+    var separators = " _-—–·";
+
+    for (var i = 1; i < filename.length - 1; i++) {
+        if (separators.indexOf(filename.charAt(i)) >= 0) {
+            var d = Math.abs(i - mid);
+            if (d < bestDistance) {
+                bestDistance = d;
+                split = i + 1;
+            }
+        }
+    }
+
+    if (split <= 1 || split >= filename.length - 1) split = mid;
+    return filename.substring(0, split) + "\r" + filename.substring(split);
+}
+
+function fitHotStampMainInfo(frame, zone, filename, sizeText) {
+    var fileLabel = "文件名: ";
+    var sizeLabel = "尺寸: ";
+    var normalSizes = [9, 8.5, 8, 7.5, 7, 6.5];
+    var compactSizes = [6.5, 6, 5.5, 5, 4.5, 4, 3.5];
+
+    // 1. 完整字段 + 完整文件名。
+    frame.contents = fileLabel + filename + "\r" + sizeLabel + sizeText;
+    for (var i = 0; i < normalSizes.length; i++) {
+        setupInfoTextFrame(frame, normalSizes[i]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 2. 保留字段，文件名按实际空间动态缩写为“前段……后段”。
+    for (var s = 0; s < compactSizes.length; s++) {
+        for (var keep = filename.length - 1; keep >= 2; keep--) {
+            frame.contents = fileLabel + compactFilenameAdaptive(filename, keep)
+                + "\r" + sizeLabel + sizeText;
+            setupInfoTextFrame(frame, compactSizes[s]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    // 3. 字段名也允许省略，但尽量同时保留“文件名 + 尺寸”。
+    for (var s2 = 0; s2 < compactSizes.length; s2++) {
+        for (var keep2 = filename.length; keep2 >= 2; keep2--) {
+            var name2 = keep2 >= filename.length ? filename : compactFilenameAdaptive(filename, keep2);
+            frame.contents = name2 + "\r" + sizeText;
+            setupInfoTextFrame(frame, compactSizes[s2]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    // 4. 两项无法共存时优先留下尺寸（纸张计算最直接），字段可省略。
+    for (var z = 0; z < compactSizes.length; z++) {
+        frame.contents = sizeLabel + sizeText;
+        setupInfoTextFrame(frame, compactSizes[z]);
+        if (frameFitsZone(frame, zone)) return true;
+        frame.contents = sizeText;
+        setupInfoTextFrame(frame, compactSizes[z]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 5. 连尺寸都放不下：该区域允许完全省略，不再强行越界。
+    return false;
+}
+
+function fitHotStampSecondaryInfo(frame, zone, pageText, dateText) {
+    var dateLabel = "日期: ";
+    var sizes = [9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5];
+
+    // 1. 首选：页码数值 + 日期字段（单画板则只有日期字段）。
+    var fullText = pageText
+        ? (pageText + " " + dateLabel + dateText)
+        : (dateLabel + dateText);
+    for (var i = 0; i < sizes.length; i++) {
+        frame.contents = fullText;
+        setupInfoTextFrame(frame, sizes[i]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 2. 多画板允许换行。
+    if (pageText) {
+        for (var j = 0; j < sizes.length; j++) {
+            frame.contents = pageText + "\r" + dateLabel + dateText;
+            setupInfoTextFrame(frame, sizes[j]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    // 3. 空间继续不足时，页码和“日期:”字段都可省略，优先保留日期本体。
+    for (var k = 0; k < sizes.length; k++) {
+        frame.contents = dateText;
+        setupInfoTextFrame(frame, sizes[k]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 4. 最终可完全省略。
+    return false;
+}
+
+// 冷烫模式备注：固定使用左上角剩余区。优先单行，其次两行，最后才截短。
+function fitHotStampCommentInfo(frame, zone, commentText) {
+    var label = "备注: ";
+    var sizes = [9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5];
+
+    // 1. 完整备注。
+    for (var i = 0; i < sizes.length; i++) {
+        frame.contents = label + commentText;
+        setupInfoTextFrame(frame, sizes[i]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 2. 字段独占一行。
+    for (var j = 0; j < sizes.length; j++) {
+        frame.contents = "备注:\r" + commentText;
+        setupInfoTextFrame(frame, sizes[j]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 3. 截短备注；字段保留时优先。
+    for (var keep = commentText.length - 1; keep >= 2; keep--) {
+        var shortComment = middleEllipsis(commentText, keep);
+        for (var k = 0; k < sizes.length; k++) {
+            frame.contents = label + shortComment;
+            setupInfoTextFrame(frame, sizes[k]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    // 4. 连字段也占空间时允许只留截短后的备注正文。
+    for (var keep2 = commentText.length - 1; keep2 >= 2; keep2--) {
+        var shortBody = middleEllipsis(commentText, keep2);
+        for (var q = 0; q < sizes.length; q++) {
+            frame.contents = shortBody;
+            setupInfoTextFrame(frame, sizes[q]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    return false;
+}
+
+function createHotStampText() {
+    var filename = getDisplayFileName();
+    var sizeText = getHotStampCompactSize();
+    var dateText = getCompactDate();
+    var pageText = getCompactPageNumber();
+
+    // 冷烫模式统一使用四个角部横向剩余区：
+    // 左上 = 备注；右上 = 页码数值 + 日期；左下 = 分色；右下 = 文件名 + 尺寸。
+    // 不再把日期放到右侧竖排，也不再根据横/竖版旋转这些信息。
+    var topZones = getHotStampTopInfoZones();
+    var bottomZones = getHotStampBottomInfoZones();
+    var commentZone = topZones.low;
+    var secondaryZone = topZones.high;
+    var mainZone = bottomZones.high;
+
+    // 右下：文件名 + 尺寸。
+    var mainFrame = textGroup.textFrames.add();
+    mainFrame.name = "documentInformationText";
+    mainFrame.contents = "文件名: " + filename + " 尺寸: " + sizeText;
+    setupInfoTextFrame(mainFrame, fontSize);
+    mainFrame.position = [0, 0];
+    var mainInfoFits = fitHotStampMainInfo(mainFrame, mainZone, filename, sizeText);
+    if (mainInfoFits) {
+        if (!placeFrameInZone(mainFrame, mainZone, "right", "center")) {
+            // 空间不足时非必要信息允许省略。
+            mainFrame.remove();
+        }
+    } else {
+        // 绝不为了“看得到”而让文字穿过角线或其它区域。
+        // 文件名/尺寸属于可省略信息，绝不为显示它们而越界。
+        mainFrame.remove();
+    }
+
+    // 右上：单画板只显示“日期:”；多画板显示“总页数-当前页 日期: ...”。
+    // 页码仍然不加“页码:”字段。
+    var secondaryFrame = textGroup.textFrames.add();
+    secondaryFrame.name = "hotStampSecondaryInformationText";
+    secondaryFrame.contents = pageText
+        ? (pageText + " 日期: " + dateText)
+        : ("日期: " + dateText);
+    setupInfoTextFrame(secondaryFrame, fontSize);
+    secondaryFrame.position = [0, 0];
+    var secondaryInfoFits = fitHotStampSecondaryInfo(secondaryFrame, secondaryZone, pageText, dateText);
+    if (secondaryInfoFits) {
+        if (!placeFrameInZone(secondaryFrame, secondaryZone, "right", "center")) {
+            secondaryFrame.remove();
+        }
+    } else {
+        secondaryFrame.remove();
+    }
+
+    // 左上：只有填写了文档备注时才生成。
+    if (Comment_text.text) {
+        var commentFrame = textGroup.textFrames.add();
+        commentFrame.name = "hotStampCommentInformationText";
+        commentFrame.contents = "备注: " + Comment_text.text;
+        setupInfoTextFrame(commentFrame, fontSize);
+        commentFrame.position = [0, 0];
+        var commentInfoFits = fitHotStampCommentInfo(commentFrame, commentZone, Comment_text.text);
+        if (commentInfoFits) {
+            if (!placeFrameInZone(commentFrame, commentZone, "left", "center")) {
+                commentFrame.remove();
+            }
+        } else {
+            commentFrame.remove();
+        }
+    }
+}
+
+function appendStyledPart(record, text, color) {
+    if (record.text.length > 0) record.text += " ";
+    var start = record.text.length;
+    record.text += text;
+    record.ranges.push({ start: start, end: record.text.length, color: color });
+}
+
+function getMonochromeTextColor() {
+    var color = documentMonochrome.color;
+    if (spotColorInfo.length > 0) {
+        for (var h = 0; h < spotColorInfo.length; h++) {
+            if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
+                var spotColor = new SpotColor();
+                spotColor.spot = doc.spots.getByName(spotColorInfo[h].name);
+                spotColor.tint = 100;
+                return spotColor;
+            }
+        }
+    }
+    return color;
+}
+
+function buildHotStampColorRecord(level) {
+    var record = { text: "", ranges: [] };
+    if (documentMonochrome.isMonochrome) {
+        var monoText = level === 0 ? "单色(COLOUR)" : (level === 1 ? "单色" : "1C");
+        appendStyledPart(record, monoText, getMonochromeTextColor());
+        return record;
+    }
+
+    var labels;
+    if (level === 0) labels = ["青色(C)", "洋红(M)", "黄色(Y)", "黑色(K)"];
+    else if (level === 1) labels = ["青(C)", "红(M)", "黄(Y)", "黑(K)"];
+    else labels = ["C", "M", "Y", "K"];
+
+    for (var i = 0; i < 4; i++) appendStyledPart(record, labels[i], mCMYK[i]);
+
+    for (var h = 0; h < spotColorInfo.length; h++) {
+        if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
+            var sc = new SpotColor();
+            sc.spot = doc.spots.getByName(spotColorInfo[h].name);
+            sc.tint = 100;
+            var spotName = level === 0 ? ("(" + spotColorInfo[h].name + ")") : spotColorInfo[h].name;
+            appendStyledPart(record, spotName, sc);
+        }
+    }
+    return record;
+}
+
+function applyStyledColors(frame, record) {
+    for (var i = 0; i < record.ranges.length; i++) {
+        var range = record.ranges[i];
+        for (var j = range.start; j < range.end; j++) {
+            frame.textRange.characters[j].characterAttributes.fillColor = range.color;
+        }
+    }
+}
+
+function setStyledRecord(frame, record, size) {
+    frame.contents = record.text;
+    setupInfoTextFrame(frame, size);
+    applyStyledColors(frame, record);
+}
+
+function buildHotStampColorRecordMultiline() {
+    var record = { text: "", ranges: [] };
+
+    if (documentMonochrome.isMonochrome) {
+        appendStyledPart(record, "单色", getMonochromeTextColor());
+        return record;
+    }
+
+    var labels = ["C", "M", "Y", "K"];
+    for (var i = 0; i < 4; i++) appendStyledPart(record, labels[i], mCMYK[i]);
+
+    var hasSpot = false;
+    for (var h = 0; h < spotColorInfo.length; h++) {
+        if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
+            if (!hasSpot) {
+                record.text += "\r";
+                hasSpot = true;
+            } else {
+                record.text += " ";
+            }
+            var sc = new SpotColor();
+            sc.spot = doc.spots.getByName(spotColorInfo[h].name);
+            sc.tint = 100;
+            var start = record.text.length;
+            record.text += spotColorInfo[h].name;
+            record.ranges.push({ start: start, end: record.text.length, color: sc });
+        }
+    }
+
+    return record;
+}
+
+// 冷烫极限兜底：专色名称、中文色名都可以省略，但 CMYK 标识必须最后保留。
+// 单色文档则用 1C，避免错误宣称为 CMYK。
+function buildHotStampMinimalColorRecord(tight) {
+    var record = { text: "", ranges: [] };
+    if (documentMonochrome.isMonochrome) {
+        appendStyledPart(record, "1C", getMonochromeTextColor());
+        return record;
+    }
+
+    var letters = ["C", "M", "Y", "K"];
+    for (var i = 0; i < 4; i++) {
+        if (!tight && record.text.length > 0) record.text += " ";
+        var start = record.text.length;
+        record.text += letters[i];
+        record.ranges.push({ start: start, end: record.text.length, color: mCMYK[i] });
+    }
+    return record;
+}
+
+function fitHotStampColorInfo(frame, zone) {
+    var levelSizes = [
+        [9, 8.5, 8],
+        [9, 8.5, 8, 7.5],
+        [9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5]
+    ];
+
+    // 1. 尽量保留完整分色 + 专色信息。
+    for (var level = 0; level < 3; level++) {
+        var record = buildHotStampColorRecord(level);
+        for (var s = 0; s < levelSizes[level].length; s++) {
+            setStyledRecord(frame, record, levelSizes[level][s]);
+            if (frameFitsZone(frame, zone)) return true;
+        }
+    }
+
+    // 2. 专色过多时允许两行。
+    var multilineRecord = buildHotStampColorRecordMultiline();
+    var multilineSizes = [6.5, 6, 5.5, 5, 4.5, 4, 3.5];
+    for (var i = 0; i < multilineSizes.length; i++) {
+        setStyledRecord(frame, multilineRecord, multilineSizes[i]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 3. 真正空间不足时，所有专色名/中文标签全部省略，只保留 C M Y K。
+    var minimalSpaced = buildHotStampMinimalColorRecord(false);
+    var minimalSizes = [6.5, 6, 5.5, 5, 4.5, 4, 3.5, 3];
+    for (var m = 0; m < minimalSizes.length; m++) {
+        setStyledRecord(frame, minimalSpaced, minimalSizes[m]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 4. 最窄区域再压成 CMYK（无空格），这是冷烫信息的最后保底项。
+    var minimalTight = buildHotStampMinimalColorRecord(true);
+    var tightSizes = [5, 4.5, 4, 3.5, 3, 2.5];
+    for (var t = 0; t < tightSizes.length; t++) {
+        setStyledRecord(frame, minimalTight, tightSizes[t]);
+        if (frameFitsZone(frame, zone)) return true;
+    }
+
+    // 仍然放不下说明版面小到 CMYK 本身都无法安全落位。
+    return false;
+}
+
+function placeMinimalCMYK(frame, preferredZone) {
+    var minimalRecord = buildHotStampMinimalColorRecord(true);
+    var sizes = [3, 2.5, 2, 1.75, 1.5];
+
+    if (!preferredZone || zoneWidth(preferredZone) <= 0 || zoneHeight(preferredZone) <= 0) return false;
+    for (var i = 0; i < sizes.length; i++) {
+        setStyledRecord(frame, minimalRecord, sizes[i]);
+        if (frameFitsZone(frame, preferredZone)
+            && placeFrameInZone(frame, preferredZone, "left", "center")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function createHotStampColorInfo() {
+    // 冷烫模式固定使用左下角横向信息区。CMYK 是唯一强制保留项；
+    // 中文色名和专色名称放不下时可逐级省略。
+    var zone = getHotStampBottomInfoZones().low;
+
+    var frame = textGroup.textFrames.add();
+    frame.name = "hotStampColorInformationText";
+    setStyledRecord(frame, buildHotStampColorRecord(0), fontSize);
+    frame.position = [0, 0];
+
+    var colorInfoFits = fitHotStampColorInfo(frame, zone);
+    if (colorInfoFits) {
+        // 重要：fitHotStampColorInfo() 可能最终选到 2.5pt。
+        // 旧版在定位失败后错误地把它重新放大到 3pt，造成“明明能 fit 却报 CMYK 放不下”的假警告。
+        // 这里保留已经选中的内容和字号直接定位。
+        if (placeFrameInZone(frame, zone, "left", "center")) return;
+    }
+
+    // 最终只保留 CMYK，并继续限制在左下外围标识区内。
+    // 不弹窗；其它信息本就允许省略，批量生成不应被正常降级打断。
+    if (!placeMinimalCMYK(frame, zone)) {
+        addLayoutWarning("极端小版面：CMYK 标识也无法在左下外围标识区安全放置，已省略。 ");
+        frame.remove();
+    }
+}
+
+// 文档信息入口：冷烫外侧模式使用新布局，其余情况完全沿用 v0.7.2
 function createText () {
+    if (hotStampingMark.value && !direction.value) {
+        createHotStampText();
+    } else {
+        createTextLegacy();
+    }
+}
+
+// 分色信息入口：冷烫外侧模式使用角部剩余空间，其余情况沿用 v0.7.2
+function colorname() {
+    if (hotStampingMark.value && !direction.value) {
+        createHotStampColorInfo();
+    } else {
+        colornameLegacy();
+    }
+}
+
+// 创建文档信息
+function createTextLegacy () {
     
     var documentInformationTextX, documentInformationTextY,
         dimensionInformationTextX, dimensionInformationTextY, rotationAngle;
@@ -1795,14 +2729,14 @@ function createText () {
     documentInformationTextFrame.name = "documentInformationText";
     documentInformationTextFrame.contents = documentInformationTextContent;
     documentInformationTextFrame.textRange.characterAttributes.size = fontSize;
-    documentInformationTextFrame.textRange.characterAttributes.textFont = fonts.getByName("MicrosoftYaHei");
+    documentInformationTextFrame.textRange.characterAttributes.textFont = infoTextFont;
     documentInformationTextFrame.textRange.characterAttributes.fillColor = processColors;
 
     var dimensionInformationTextContentFrame = textGroup.textFrames.add();
     dimensionInformationTextContentFrame.name = "dimensionInformationText";
     dimensionInformationTextContentFrame.contents = dimensionInformationTextContent;
     dimensionInformationTextContentFrame.textRange.characterAttributes.size = fontSize;
-    dimensionInformationTextContentFrame.textRange.characterAttributes.textFont = fonts.getByName("MicrosoftYaHei");
+    dimensionInformationTextContentFrame.textRange.characterAttributes.textFont = infoTextFont;
     dimensionInformationTextContentFrame.textRange.characterAttributes.fillColor = processColors;
 
     textHeight = documentInformationTextFrame.textRange.characterAttributes.size * 0.3528 * pointTomm;
@@ -1869,15 +2803,16 @@ function createText () {
 //~     dimensionInformationTextFrame.createOutline();
 }
 // 创建分色信息
-function colorname() {
+function colornameLegacy() {
     var textRef = textGroup.textFrames.add();
+    var rotationAngle = 0;
     if (documentMonochrome.isMonochrome) {
         textRef.contents = "单色(COLOUR)";
     } else {
         textRef.contents = "青色(C) 洋红(M) 黄色(Y) 黑色(K) ";
     }
     textRef.textRange.characterAttributes.size = fontSize;
-    textRef.textRange.characterAttributes.textFont = fonts.getByName("MicrosoftYaHei");
+    textRef.textRange.characterAttributes.textFont = infoTextFont;
     var textWidth = textRef.width;
     if (pw > ph) {
         if(direction.value) {
@@ -1961,7 +2896,7 @@ function colorname() {
                     var spotNametextRef = textGroup.textFrames.add();
                     spotNametextRef.contents = "(" + spotColorInfo[h].name + ") ";
                     spotNametextRef.textRange.characterAttributes.size = fontSize;
-                    spotNametextRef.textRange.characterAttributes.textFont = fonts.getByName("MicrosoftYaHei");
+                    spotNametextRef.textRange.characterAttributes.textFont = infoTextFont;
                     spotNametextRef.textRange.characterAttributes.fillColor = spotColor;
                     if (pw > ph) {
                         if(direction.value) {
@@ -2026,49 +2961,75 @@ function getLayerByName(name) {
     var layers = doc.layers;
     for (var i = 0; i < layers.length; i++) {
         if (layers[i].name === name) {
-            if (!layers[i].visible) {
-                alert("图层不可见！", "错误")
-            }
             return layers[i];
         }
     }
     return null;
 }
+
+function getLayerWriteIssue(layer) {
+    if (!layer) return "";
+    if (!layer.visible) return "图层“" + layer.name + "”当前不可见。";
+    if (layer.locked) return "图层“" + layer.name + "”当前已锁定。";
+    return "";
+}
+
+function restoreDocumentContext(documentRef, activeLayer, activeArtboardIndex) {
+    try {
+        if (documentRef.artboards.length > 0) {
+            documentRef.artboards.setActiveArtboardIndex(activeArtboardIndex);
+        }
+    } catch (e) {
+        logRuntimeWarning("无法恢复原活动画板：" + e.message);
+    }
+    try {
+        if (activeLayer) documentRef.activeLayer = activeLayer;
+    } catch (e) {
+        logRuntimeWarning("无法恢复原活动图层：" + e.message);
+    }
+}
 // 获取尺寸信息
+// 始终显示最终纸张/输出范围尺寸：
+// - 普通画板 + 自适应画板：显示扩展后的尺寸；
+// - 冷烫模式：显示包含外围标记后的尺寸（白墨不参与尺寸计算）；
+// - 选中对象生成标记：即使画板不扩展，也显示对象 + 外围标记所需纸张尺寸。
 function pagesize() {
+    var outputSize = getOutputSizePoints();
+    var widthPt = outputSize.width;
+    var heightPt = outputSize.height;
     var sizeUnit = "MM";
-    var sizeX = pw;
-    var sizeY = ph;
+    var sizeX = widthPt;
+    var sizeY = heightPt;
     switch (doc.rulerUnits) {
         case RulerUnits.Centimeters:
             sizeUnit = " 厘米 ";
-            sizeX = Math.round(((pw / pointTomm) / 10) * 100) / 100;
-            sizeY = Math.round(((ph / pointTomm) / 10) * 100) / 100;
+            sizeX = Math.round(((widthPt / pointTomm) / 10) * 100) / 100;
+            sizeY = Math.round(((heightPt / pointTomm) / 10) * 100) / 100;
             break;
         case RulerUnits.Inches:
             sizeUnit = " 英吋 ";
-            sizeX = Math.round((pw / 72) * 100) / 100;
-            sizeY = Math.round((ph / 72) * 100) / 100;
+            sizeX = Math.round((widthPt / 72) * 100) / 100;
+            sizeY = Math.round((heightPt / 72) * 100) / 100;
             break;
         case RulerUnits.Millimeters:
             sizeUnit = " 毫米 ";
-            sizeX = Math.round(((pw / pointTomm) + 0.001) * 100) / 100;
-            sizeY = Math.round(((ph / pointTomm) + 0.001) * 100) / 100;
+            sizeX = Math.round(((widthPt / pointTomm) + 0.001) * 100) / 100;
+            sizeY = Math.round(((heightPt / pointTomm) + 0.001) * 100) / 100;
             break;
         case RulerUnits.Points:
             sizeUnit = " 点 ";
-            sizeX = Math.round(pw * 100) / 100;
-            sizeY = Math.round(ph * 100) / 100;
+            sizeX = Math.round(widthPt * 100) / 100;
+            sizeY = Math.round(heightPt * 100) / 100;
             break;
         case RulerUnits.Pixels:
             sizeUnit = " 像素 ";
-            sizeX = Math.round(pw * 100) / 100;
-            sizeY = Math.round(ph * 100) / 100;
+            sizeX = Math.round(widthPt * 100) / 100;
+            sizeY = Math.round(heightPt * 100) / 100;
             break;
         case RulerUnits.Qs:
             sizeUnit = " Ha ";
-            sizeX = Math.round(pw * 141.111) / 100;
-            sizeY = Math.round(ph * 141.111) / 100;
+            sizeX = Math.round(widthPt * 141.111) / 100;
+            sizeY = Math.round(heightPt * 141.111) / 100;
             break;
     }
     return " 尺寸 : " + sizeX + "X" + sizeY + sizeUnit;
@@ -2195,7 +3156,7 @@ function getBounds(obj) {
     var n = obj.length;
     if (n > 0) {
         if (obj[0].typename == "GroupItem" && obj[0].clipped && obj[0].pageItems.length > 1) {
-            clipObj = obj[0].pathItems[0].geometricBounds;
+            var clipObj = obj[0].pathItems[0].geometricBounds;
             vgb1 = clipObj;
         } else {
             selObj1 = obj[0];
