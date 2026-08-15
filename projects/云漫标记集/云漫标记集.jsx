@@ -540,7 +540,7 @@ if (app.documents.length == 0) {
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.4.2";
+    dialog.text = "云漫标记集 Ver 0.7.4.3";
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
@@ -2271,19 +2271,18 @@ function safeSuffix(text, count) {
     return text.substring(start);
 }
 
-// 文件名缩写使用“前段……后段”的形式，但保留字符数不固定。
-// keepChars 表示省略号之外尽量保留的总字符数，左右尽量均分。
+// 文件名没有固定结构，放不下时只从末尾截断并添加一个省略号。
+// keepChars 表示省略号之前尽量保留的前缀长度；实际调用方仍按渲染尺寸逐级尝试。
 // 同时避免把 emoji / 扩展字符的 UTF-16 代理对从中间截断。
-function compactFilenameAdaptive(filename, keepChars) {
+function truncateFilenameFromEnd(filename, keepChars) {
     if (!filename) return "";
     if (keepChars >= filename.length) return filename;
-    if (keepChars < 2) keepChars = 2;
-
-    var leftChars = Math.ceil(keepChars / 2);
-    var rightChars = Math.floor(keepChars / 2);
-    return safePrefix(filename, leftChars)
-        + "……"
-        + safeSuffix(filename, rightChars);
+    var marker = "…";
+    var maxPrefixChars = filename.length - marker.length - 1;
+    if (maxPrefixChars < 1) return filename;
+    if (keepChars > maxPrefixChars) keepChars = maxPrefixChars;
+    if (keepChars < 1) keepChars = 1;
+    return safePrefix(filename, keepChars) + marker;
 }
 
 // 文件名特别长时，允许文件名自身拆成两行；尺寸仍完整独占最后一行。
@@ -2321,10 +2320,10 @@ function fitHotStampMainInfo(frame, zone, filename, sizeText) {
         if (frameFitsZone(frame, zone)) return true;
     }
 
-    // 2. 保留字段，文件名按实际空间动态缩写为“前段……后段”。
+    // 2. 保留字段，文件名按实际空间从末尾逐级截断。
     for (var s = 0; s < compactSizes.length; s++) {
         for (var keep = filename.length - 1; keep >= 2; keep--) {
-            frame.contents = fileLabel + compactFilenameAdaptive(filename, keep)
+            frame.contents = fileLabel + truncateFilenameFromEnd(filename, keep)
                 + "\r" + sizeLabel + sizeText;
             setupInfoTextFrame(frame, compactSizes[s]);
             if (frameFitsZone(frame, zone)) return true;
@@ -2334,7 +2333,7 @@ function fitHotStampMainInfo(frame, zone, filename, sizeText) {
     // 3. 字段名也允许省略，但尽量同时保留“文件名 + 尺寸”。
     for (var s2 = 0; s2 < compactSizes.length; s2++) {
         for (var keep2 = filename.length; keep2 >= 2; keep2--) {
-            var name2 = keep2 >= filename.length ? filename : compactFilenameAdaptive(filename, keep2);
+            var name2 = keep2 >= filename.length ? filename : truncateFilenameFromEnd(filename, keep2);
             frame.contents = name2 + "\r" + sizeText;
             setupInfoTextFrame(frame, compactSizes[s2]);
             if (frameFitsZone(frame, zone)) return true;

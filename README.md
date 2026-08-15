@@ -7,7 +7,7 @@
 ### 云漫标记集
 
 - 项目目录：`projects/云漫标记集/`
-- 当前源码：`projects/云漫标记集/云漫标记集.jsx`（当前版本 v0.7.4.2）
+- 当前源码：`projects/云漫标记集/云漫标记集.jsx`（当前版本 v0.7.4.3）
 - 变更记录：`projects/云漫标记集/CHANGELOG.md`
 - 定向验证：`projects/云漫标记集/verify.ps1`
 - `dist/` 保存 JSXBIN 编译产物，不作为当前源码编辑入口。
@@ -47,5 +47,5 @@ GitHub Actions 工作流位于 `.github/workflows/release-yunman.yml`，使用 N
 npm ci
 node tools/build-jsxbin.mjs `
   --input "projects/云漫标记集/云漫标记集.jsx" `
-  --output "release/YunManMarks-v0.7.4.2.jsx"
+  --output "release/YunManMarks-v0.7.4.3.jsx"
 ```

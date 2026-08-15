@@ -18,7 +18,7 @@ function Assert-NotContains([string]$Text, [string]$Forbidden, [string]$Label) {
     }
 }
 
-Assert-Contains $content '云漫标记集 Ver 0.7.4.2' '版本号'
+Assert-Contains $content '云漫标记集 Ver 0.7.4.3' '版本号'
 Assert-Contains $content '["青(C)", "红(M)", "黄(Y)", "黑(K)"]' '紧凑 CMYK 中文标签'
 Assert-NotContains $content '洋(M)' '错误的紧凑洋红标签'
 Assert-Contains $content 'markAreaMM < 4 || offsetMM < 0' '标记大小和偏移下限'
@@ -215,11 +215,34 @@ function probeHotStampEdgesAndInfoDirection() {
   }
 }
 
+function probeFilenameCompaction() {
+  eval([
+    functionText('isHighSurrogateCode'),
+    functionText('isLowSurrogateCode'),
+    functionText('safePrefix'),
+    functionText('safeSuffix'),
+    functionText('truncateFilenameFromEnd')
+  ].join('\n'));
+
+  const original = 'uv烫金机2026测试_理光';
+  const compacted = truncateFilenameFromEnd(original, original.length - 1);
+  if (compacted.length >= original.length) {
+    throw new Error('abbreviated filename became as long as or longer than the original');
+  }
+  if (!compacted.startsWith('uv')
+      || !compacted.endsWith('…')
+      || compacted.includes('……')
+      || compacted.endsWith('理光')) {
+    throw new Error('abbreviated filename did not use end truncation with one marker');
+  }
+}
+
 probeOuterZones();
 probeHotStampEdgesAndInfoDirection();
+probeFilenameCompaction();
 if (!probePlacement(0.02)) throw new Error('small multi-artboard rounding error was rejected');
 if (probePlacement(0.20)) throw new Error('real overflow was incorrectly accepted');
-console.log('Node syntax, layout, four-edge marks, and direction probes: OK');
+console.log('Node syntax, layout, filename compaction, four-edge marks, and direction probes: OK');
 '@
 
 $nodeProbe | & node - $resolvedPath
