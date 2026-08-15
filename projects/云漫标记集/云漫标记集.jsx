@@ -540,7 +540,7 @@ if (app.documents.length == 0) {
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.4.1"; 
+    dialog.text = "云漫标记集 Ver 0.7.4.2";
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
@@ -1240,19 +1240,15 @@ function main() {
     }
 
 }
-// 创建识别标识：中点留给角线，向两边每 30mm 铺一颗，距扩展后边角不足 30mm 则停
+// 创建识别标识：四边都生成；中点留给角线，向两边每 30mm 铺一颗，距扩展后边角不足 30mm 则停
 function createMark() {
     var midX = (left + right) / 2;
     var midY = (top + bottom) / 2;
     var expanded = getExpandedArtboardBounds();
-    // 沿画板长边生成：横版放上下，竖版及正方形沿用原分支放左右。
-    if (pw > ph) {
-        placeHotStampMarksOnEdge(midX, top + markOffset + reticleLength, "h", expanded.left, expanded.right, topMarksGroup);
-        placeHotStampMarksOnEdge(midX, bottom - markOffset - reticleLength, "h", expanded.left, expanded.right, bottomMarksGroup);
-    } else {
-        placeHotStampMarksOnEdge(right + markOffset + reticleLength, midY, "v", expanded.bottom, expanded.top, rightMarksGroup);
-        placeHotStampMarksOnEdge(left - markOffset - reticleLength, midY, "v", expanded.bottom, expanded.top, leftMarksGroup);
-    }
+    placeHotStampMarksOnEdge(midX, top + markOffset + reticleLength, "h", expanded.left, expanded.right, topMarksGroup);
+    placeHotStampMarksOnEdge(midX, bottom - markOffset - reticleLength, "h", expanded.left, expanded.right, bottomMarksGroup);
+    placeHotStampMarksOnEdge(right + markOffset + reticleLength, midY, "v", expanded.bottom, expanded.top, rightMarksGroup);
+    placeHotStampMarksOnEdge(left - markOffset - reticleLength, midY, "v", expanded.bottom, expanded.top, leftMarksGroup);
 }
 
 function getExpandedArtboardBounds() {
@@ -1764,22 +1760,19 @@ function createWhiteInkByHotStampRange(rectangleGroup, spotColor) {
     var rightX = right + markOffset + reticleLength;
     var leftX = left - markOffset - reticleLength;
 
-    // 白墨只跟随实际生成冷烫标记的长边，不再额外覆盖另外两边。
-    if (pw > ph) {
-        var topParts = getHotStampEdgePositions(midX, topY, "h", expanded.left, expanded.right);
-        var bottomParts = getHotStampEdgePositions(midX, bottomY, "h", expanded.left, expanded.right);
-        addWhiteInkAlongPositions("h", topParts.low, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("h", topParts.high, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("h", bottomParts.low, 0, bottom - markOffset, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("h", bottomParts.high, 0, bottom - markOffset, rectangleGroup, spotColor);
-    } else {
-        var rightParts = getHotStampEdgePositions(rightX, midY, "v", expanded.bottom, expanded.top);
-        var leftParts = getHotStampEdgePositions(leftX, midY, "v", expanded.bottom, expanded.top);
-        addWhiteInkAlongPositions("v", leftParts.low, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("v", leftParts.high, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("v", rightParts.low, right + markOffset, 0, rectangleGroup, spotColor);
-        addWhiteInkAlongPositions("v", rightParts.high, right + markOffset, 0, rectangleGroup, spotColor);
-    }
+    var topParts = getHotStampEdgePositions(midX, topY, "h", expanded.left, expanded.right);
+    var bottomParts = getHotStampEdgePositions(midX, bottomY, "h", expanded.left, expanded.right);
+    var rightParts = getHotStampEdgePositions(rightX, midY, "v", expanded.bottom, expanded.top);
+    var leftParts = getHotStampEdgePositions(leftX, midY, "v", expanded.bottom, expanded.top);
+
+    addWhiteInkAlongPositions("h", topParts.low, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", topParts.high, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", bottomParts.low, 0, bottom - markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("h", bottomParts.high, 0, bottom - markOffset, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", leftParts.low, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", leftParts.high, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", rightParts.low, right + markOffset, 0, rectangleGroup, spotColor);
+    addWhiteInkAlongPositions("v", rightParts.high, right + markOffset, 0, rectangleGroup, spotColor);
 }
 // 创建填充块
 function createRectangle(rectangleGroup, x, y, rectWidth, rectHeight, color) {
@@ -2438,30 +2431,56 @@ function fitHotStampCommentInfo(frame, zone, commentText) {
     return false;
 }
 
+// 四角信息始终留在外围标识区；只按画板长边切换排版方向。
+// 横版沿上下边横排，竖版及正方形沿左右边旋转 270 度。
+function getHotStampInfoLayout() {
+    if (pw > ph) {
+        var topZones = getHotStampTopInfoZones();
+        var bottomZones = getHotStampBottomInfoZones();
+        return {
+            rotation: 0,
+            comment: { zone: topZones.low, hAlign: "left", vAlign: "center" },
+            secondary: { zone: topZones.high, hAlign: "right", vAlign: "center" },
+            color: { zone: bottomZones.low, hAlign: "left", vAlign: "center" },
+            main: { zone: bottomZones.high, hAlign: "right", vAlign: "center" }
+        };
+    }
+
+    var leftZones = getHotStampLeftInfoZones();
+    var rightZones = getHotStampRightInfoZones();
+    return {
+        rotation: 270,
+        comment: { zone: leftZones.high, hAlign: "center", vAlign: "top" },
+        secondary: { zone: rightZones.high, hAlign: "center", vAlign: "top" },
+        color: { zone: leftZones.low, hAlign: "center", vAlign: "bottom" },
+        main: { zone: rightZones.low, hAlign: "center", vAlign: "bottom" }
+    };
+}
+
+function rotateHotStampInfoFrame(frame, rotation) {
+    if (rotation) frame.rotate(rotation);
+}
+
 function createHotStampText() {
     var filename = getDisplayFileName();
     var sizeText = getHotStampCompactSize();
     var dateText = getCompactDate();
     var pageText = getCompactPageNumber();
+    var layout = getHotStampInfoLayout();
+    var commentLayout = layout.comment;
+    var secondaryLayout = layout.secondary;
+    var mainLayout = layout.main;
 
-    // 冷烫模式统一使用四个角部横向剩余区：
-    // 左上 = 备注；右上 = 页码数值 + 日期；左下 = 分色；右下 = 文件名 + 尺寸。
-    // 不再把日期放到右侧竖排，也不再根据横/竖版旋转这些信息。
-    var topZones = getHotStampTopInfoZones();
-    var bottomZones = getHotStampBottomInfoZones();
-    var commentZone = topZones.low;
-    var secondaryZone = topZones.high;
-    var mainZone = bottomZones.high;
-
-    // 右下：文件名 + 尺寸。
+    // 右下角：文件名 + 尺寸。
     var mainFrame = textGroup.textFrames.add();
     mainFrame.name = "documentInformationText";
     mainFrame.contents = "文件名: " + filename + " 尺寸: " + sizeText;
     setupInfoTextFrame(mainFrame, fontSize);
     mainFrame.position = [0, 0];
-    var mainInfoFits = fitHotStampMainInfo(mainFrame, mainZone, filename, sizeText);
+    rotateHotStampInfoFrame(mainFrame, layout.rotation);
+    var mainInfoFits = fitHotStampMainInfo(mainFrame, mainLayout.zone, filename, sizeText);
     if (mainInfoFits) {
-        if (!placeFrameInZone(mainFrame, mainZone, "right", "center")) {
+        if (!placeFrameInZone(mainFrame, mainLayout.zone, mainLayout.hAlign, mainLayout.vAlign)) {
             // 空间不足时非必要信息允许省略。
             mainFrame.remove();
         }
@@ -2471,7 +2490,7 @@ function createHotStampText() {
         mainFrame.remove();
     }
 
-    // 右上：单画板只显示“日期:”；多画板显示“总页数-当前页 日期: ...”。
+    // 右上角：单画板只显示“日期:”；多画板显示“总页数-当前页 日期: ...”。
     // 页码仍然不加“页码:”字段。
     var secondaryFrame = textGroup.textFrames.add();
     secondaryFrame.name = "hotStampSecondaryInformationText";
@@ -2480,25 +2499,27 @@ function createHotStampText() {
         : ("日期: " + dateText);
     setupInfoTextFrame(secondaryFrame, fontSize);
     secondaryFrame.position = [0, 0];
-    var secondaryInfoFits = fitHotStampSecondaryInfo(secondaryFrame, secondaryZone, pageText, dateText);
+    rotateHotStampInfoFrame(secondaryFrame, layout.rotation);
+    var secondaryInfoFits = fitHotStampSecondaryInfo(secondaryFrame, secondaryLayout.zone, pageText, dateText);
     if (secondaryInfoFits) {
-        if (!placeFrameInZone(secondaryFrame, secondaryZone, "right", "center")) {
+        if (!placeFrameInZone(secondaryFrame, secondaryLayout.zone, secondaryLayout.hAlign, secondaryLayout.vAlign)) {
             secondaryFrame.remove();
         }
     } else {
         secondaryFrame.remove();
     }
 
-    // 左上：只有填写了文档备注时才生成。
+    // 左上角：只有填写了文档备注时才生成。
     if (Comment_text.text) {
         var commentFrame = textGroup.textFrames.add();
         commentFrame.name = "hotStampCommentInformationText";
         commentFrame.contents = "备注: " + Comment_text.text;
         setupInfoTextFrame(commentFrame, fontSize);
         commentFrame.position = [0, 0];
-        var commentInfoFits = fitHotStampCommentInfo(commentFrame, commentZone, Comment_text.text);
+        rotateHotStampInfoFrame(commentFrame, layout.rotation);
+        var commentInfoFits = fitHotStampCommentInfo(commentFrame, commentLayout.zone, Comment_text.text);
         if (commentInfoFits) {
-            if (!placeFrameInZone(commentFrame, commentZone, "left", "center")) {
+            if (!placeFrameInZone(commentFrame, commentLayout.zone, commentLayout.hAlign, commentLayout.vAlign)) {
                 commentFrame.remove();
             }
         } else {
@@ -2666,15 +2687,17 @@ function fitHotStampColorInfo(frame, zone) {
     return false;
 }
 
-function placeMinimalCMYK(frame, preferredZone) {
+function placeMinimalCMYK(frame, preferredZone, hAlign, vAlign) {
     var minimalRecord = buildHotStampMinimalColorRecord(true);
     var sizes = [3, 2.5, 2, 1.75, 1.5];
+    hAlign = hAlign || "left";
+    vAlign = vAlign || "center";
 
     if (!preferredZone || zoneWidth(preferredZone) <= 0 || zoneHeight(preferredZone) <= 0) return false;
     for (var i = 0; i < sizes.length; i++) {
         setStyledRecord(frame, minimalRecord, sizes[i]);
         if (frameFitsZone(frame, preferredZone)
-            && placeFrameInZone(frame, preferredZone, "left", "center")) {
+            && placeFrameInZone(frame, preferredZone, hAlign, vAlign)) {
             return true;
         }
     }
@@ -2682,26 +2705,28 @@ function placeMinimalCMYK(frame, preferredZone) {
 }
 
 function createHotStampColorInfo() {
-    // 冷烫模式固定使用左下角横向信息区。CMYK 是唯一强制保留项；
-    // 中文色名和专色名称放不下时可逐级省略。
-    var zone = getHotStampBottomInfoZones().low;
+    // 冷烫模式固定使用左下角信息区，并随长边方向旋转。
+    // CMYK 是唯一强制保留项；中文色名和专色名称放不下时可逐级省略。
+    var layout = getHotStampInfoLayout();
+    var colorLayout = layout.color;
 
     var frame = textGroup.textFrames.add();
     frame.name = "hotStampColorInformationText";
     setStyledRecord(frame, buildHotStampColorRecord(0), fontSize);
     frame.position = [0, 0];
+    rotateHotStampInfoFrame(frame, layout.rotation);
 
-    var colorInfoFits = fitHotStampColorInfo(frame, zone);
+    var colorInfoFits = fitHotStampColorInfo(frame, colorLayout.zone);
     if (colorInfoFits) {
         // 重要：fitHotStampColorInfo() 可能最终选到 2.5pt。
         // 旧版在定位失败后错误地把它重新放大到 3pt，造成“明明能 fit 却报 CMYK 放不下”的假警告。
         // 这里保留已经选中的内容和字号直接定位。
-        if (placeFrameInZone(frame, zone, "left", "center")) return;
+        if (placeFrameInZone(frame, colorLayout.zone, colorLayout.hAlign, colorLayout.vAlign)) return;
     }
 
     // 最终只保留 CMYK，并继续限制在左下外围标识区内。
     // 不弹窗；其它信息本就允许省略，批量生成不应被正常降级打断。
-    if (!placeMinimalCMYK(frame, zone)) {
+    if (!placeMinimalCMYK(frame, colorLayout.zone, colorLayout.hAlign, colorLayout.vAlign)) {
         addLayoutWarning("极端小版面：CMYK 标识也无法在左下外围标识区安全放置，已省略。 ");
         frame.remove();
     }

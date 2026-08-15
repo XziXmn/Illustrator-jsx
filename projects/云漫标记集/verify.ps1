@@ -18,7 +18,7 @@ function Assert-NotContains([string]$Text, [string]$Forbidden, [string]$Label) {
     }
 }
 
-Assert-Contains $content '云漫标记集 Ver 0.7.4.1' '版本号'
+Assert-Contains $content '云漫标记集 Ver 0.7.4.2' '版本号'
 Assert-Contains $content '["青(C)", "红(M)", "黄(Y)", "黑(K)"]' '紧凑 CMYK 中文标签'
 Assert-NotContains $content '洋(M)' '错误的紧凑洋红标签'
 Assert-Contains $content 'markAreaMM < 4 || offsetMM < 0' '标记大小和偏移下限'
@@ -30,6 +30,8 @@ Assert-Contains $content 'var bandTop = bottom - markOffset - crossPad;' '底部
 Assert-Contains $content 'var bandBottom = top + markOffset + crossPad;' '顶部外围标识区'
 Assert-Contains $content '避免“fit=true 但 place=false”导致文字被删除' 'fit/place 一致性修复'
 Assert-Contains $content 'var epsilon = 0.03 * pointTomm;' '多画板坐标舍入容差'
+Assert-Contains $content 'function getHotStampInfoLayout()' '冷烫信息长边方向布局'
+Assert-Contains $content 'rotateHotStampInfoFrame(mainFrame, layout.rotation);' '冷烫信息旋转'
 Assert-Contains $content 'var documentSpotColorInfoEnabled = false;' '文档专色信息暂停开关'
 Assert-Contains $content 'restoreDocumentContext(doc, originalActiveLayer, originalActiveArtboardIndex);' '文档上下文恢复'
 Assert-Contains $content 'function loadStoredParams(file)' '设置读取容错'
@@ -128,7 +130,7 @@ function probePlacement(roundingError) {
   );
 }
 
-function probeLongEdgeHotStamp() {
+function probeHotStampEdgesAndInfoDirection() {
   let left = 0, right = 200, top = 100, bottom = 0;
   let pw = 200, ph = 100;
   let markOffset = 2, reticleLength = 3, stripWidth = 6;
@@ -143,21 +145,26 @@ function probeLongEdgeHotStamp() {
   }
   eval(functionText('createMark'));
 
+  const expectedMarks = JSON.stringify([
+    { axis: 'h', group: 'top' }, { axis: 'h', group: 'bottom' },
+    { axis: 'v', group: 'right' }, { axis: 'v', group: 'left' }
+  ]);
+
   createMark();
-  if (JSON.stringify(markCalls) !== JSON.stringify([
-    { axis: 'h', group: 'top' }, { axis: 'h', group: 'bottom' }
-  ])) throw new Error('landscape hot-stamp marks were not limited to long edges');
+  if (JSON.stringify(markCalls) !== expectedMarks) {
+    throw new Error('landscape hot-stamp marks were not generated on all four edges');
+  }
 
   pw = 100; ph = 200; right = 100; top = 200; markCalls = [];
   createMark();
-  if (JSON.stringify(markCalls) !== JSON.stringify([
-    { axis: 'v', group: 'right' }, { axis: 'v', group: 'left' }
-  ])) throw new Error('portrait hot-stamp marks were not limited to long edges');
+  if (JSON.stringify(markCalls) !== expectedMarks) {
+    throw new Error('portrait hot-stamp marks were not generated on all four edges');
+  }
 
   pw = ph = 100; right = top = 100; markCalls = [];
   createMark();
-  if (markCalls.length !== 2 || markCalls[0].axis !== 'v' || markCalls[1].axis !== 'v') {
-    throw new Error('square hot-stamp branch changed unexpectedly');
+  if (JSON.stringify(markCalls) !== expectedMarks) {
+    throw new Error('square hot-stamp marks were not generated on all four edges');
   }
 
   let whiteAxes = [];
@@ -167,18 +174,52 @@ function probeLongEdgeHotStamp() {
 
   pw = 200; ph = 100; right = 200; top = 100; whiteAxes = [];
   createWhiteInkByHotStampRange({}, {});
-  if (whiteAxes.join('') !== 'hhhh') throw new Error('landscape white ink did not follow long edges');
+  if (whiteAxes.join('') !== 'hhhhvvvv') throw new Error('landscape white ink did not cover all mark edges');
 
   pw = 100; ph = 200; right = 100; top = 200; whiteAxes = [];
   createWhiteInkByHotStampRange({}, {});
-  if (whiteAxes.join('') !== 'vvvv') throw new Error('portrait white ink did not follow long edges');
+  if (whiteAxes.join('') !== 'hhhhvvvv') throw new Error('portrait white ink did not cover all mark edges');
+
+  function getHotStampTopInfoZones() {
+    return { low: { id: 'top-left' }, high: { id: 'top-right' } };
+  }
+  function getHotStampBottomInfoZones() {
+    return { low: { id: 'bottom-left' }, high: { id: 'bottom-right' } };
+  }
+  function getHotStampLeftInfoZones() {
+    return { low: { id: 'left-bottom' }, high: { id: 'left-top' } };
+  }
+  function getHotStampRightInfoZones() {
+    return { low: { id: 'right-bottom' }, high: { id: 'right-top' } };
+  }
+  eval(functionText('getHotStampInfoLayout'));
+
+  pw = 200; ph = 100;
+  let layout = getHotStampInfoLayout();
+  if (layout.rotation !== 0
+      || layout.comment.zone.id !== 'top-left'
+      || layout.secondary.zone.id !== 'top-right'
+      || layout.color.zone.id !== 'bottom-left'
+      || layout.main.zone.id !== 'bottom-right') {
+    throw new Error('landscape information did not use four horizontal corner zones');
+  }
+
+  pw = 100; ph = 200;
+  layout = getHotStampInfoLayout();
+  if (layout.rotation !== 270
+      || layout.comment.zone.id !== 'left-top'
+      || layout.secondary.zone.id !== 'right-top'
+      || layout.color.zone.id !== 'left-bottom'
+      || layout.main.zone.id !== 'right-bottom') {
+    throw new Error('portrait information did not rotate into four vertical corner zones');
+  }
 }
 
 probeOuterZones();
-probeLongEdgeHotStamp();
+probeHotStampEdgesAndInfoDirection();
 if (!probePlacement(0.02)) throw new Error('small multi-artboard rounding error was rejected');
 if (probePlacement(0.20)) throw new Error('real overflow was incorrectly accepted');
-console.log('Node syntax, layout, and long-edge probes: OK');
+console.log('Node syntax, layout, four-edge marks, and direction probes: OK');
 '@
 
 $nodeProbe | & node - $resolvedPath
