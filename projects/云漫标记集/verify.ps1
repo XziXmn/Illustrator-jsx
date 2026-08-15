@@ -1,5 +1,5 @@
 param(
-    [string]$ScriptPath = (Join-Path $PSScriptRoot '云漫标记集v0.7.4.1.jsx')
+    [string]$ScriptPath = (Join-Path $PSScriptRoot '云漫标记集.jsx')
 )
 
 $ErrorActionPreference = 'Stop'
