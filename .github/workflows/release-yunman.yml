@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "可选：补传到已有 Release 的 Tag，例如 v0.7.4.1；留空则只生成 Artifact"
+        description: "可选：只填写 Tag 值，如 v0.7.4.1；留空则只生成 Artifact"
         required: false
         type: string
   push:
@@ -54,7 +54,19 @@ jobs:
           }
 
           $version = $versionMatch.Groups['version'].Value
-          $releaseTag = "$env:RELEASE_TAG_INPUT".Trim()
+          $releaseTagInput = "$env:RELEASE_TAG_INPUT".Trim()
+          $releaseTag = ""
+          if ($releaseTagInput) {
+              $releaseTagMatch = [regex]::Match(
+                  $releaseTagInput,
+                  '^(?:(?i:release_tag)\s*:\s*)?(?<tag>v\d+(?:\.\d+)+)$'
+              )
+              if (-not $releaseTagMatch.Success) {
+                  throw "release_tag 格式无效，请只填写类似 v0.7.4.1 的 Tag 值。"
+              }
+              $releaseTag = $releaseTagMatch.Groups['tag'].Value
+          }
+
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
               $releaseTag = $env:GITHUB_REF_NAME
           }
