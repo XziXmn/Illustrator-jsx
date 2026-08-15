@@ -1,0 +1,122 @@
+name: 构建并发布云漫标记集
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yunman-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 验证并编译 JSXBIN
+    runs-on: windows-2022
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装锁定依赖
+        run: npm ci
+
+      - name: 运行云漫标记集定向验证
+        shell: pwsh
+        run: ./projects/云漫标记集/verify.ps1
+
+      - name: 读取并校验版本
+        id: metadata
+        shell: pwsh
+        run: |
+          $sourcePath = "projects/云漫标记集/云漫标记集.jsx"
+          $source = Get-Content -LiteralPath $sourcePath -Raw -Encoding UTF8
+          $versionMatch = [regex]::Match($source, '云漫标记集 Ver (?<version>\d+(?:\.\d+)+)')
+          if (-not $versionMatch.Success) {
+              throw "无法从 $sourcePath 读取版本号。"
+          }
+
+          $version = $versionMatch.Groups['version'].Value
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              $expectedTag = "v$version"
+              if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+                  throw "Tag $env:GITHUB_REF_NAME 与源码版本 $expectedTag 不一致。"
+              }
+          }
+
+          $assetName = "云漫标记集v$version.jsx"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "asset_name=$assetName" >> $env:GITHUB_OUTPUT
+
+      - name: 编译标准 JSXBIN
+        shell: pwsh
+        run: |
+          node tools/build-jsxbin.mjs `
+            --input "projects/云漫标记集/云漫标记集.jsx" `
+            --output "release/${{ steps.metadata.outputs.asset_name }}"
+
+      - name: 保存测试构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: 云漫标记集-v${{ steps.metadata.outputs.version }}-JSXBIN
+          path: |
+            release/${{ steps.metadata.outputs.asset_name }}
+            release/${{ steps.metadata.outputs.asset_name }}.sha256
+          if-no-files-found: error
+
+      - name: 创建或更新 GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $asset = "release/$env:ASSET_NAME"
+          $checksum = "$asset.sha256"
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+              $existingAssets = @(
+                  gh release view $tag `
+                    --json assets `
+                    --jq '.assets[].name' `
+                    --repo $env:GITHUB_REPOSITORY
+              )
+              if ($LASTEXITCODE -ne 0) {
+                  throw "无法读取 Release $tag 的资产列表。"
+              }
+
+              foreach ($file in @($asset, $checksum)) {
+                  $fileName = Split-Path -Leaf $file
+                  if ($existingAssets -contains $fileName) {
+                      Write-Host "保留现有 Release 资产: $fileName"
+                      continue
+                  }
+
+                  gh release upload $tag $file --repo $env:GITHUB_REPOSITORY
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "Release 资产上传失败: $fileName"
+                  }
+              }
+          } else {
+              gh release create $tag $asset $checksum `
+                --verify-tag `
+                --generate-notes `
+                --title "云漫标记集 $tag" `
+                --repo $env:GITHUB_REPOSITORY
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+              throw "GitHub Release 创建或上传失败，退出码: $LASTEXITCODE"
+          }

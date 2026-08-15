@@ -1,0 +1,13 @@
+{
+  "name": "illustrator-jsx-build",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Illustrator ExtendScript 的可复现 JSXBIN 构建工具",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "jsxbin": "2.3.0"
+  }
+}

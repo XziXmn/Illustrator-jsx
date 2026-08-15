@@ -30,3 +30,22 @@
 - 云漫标记集使用固定源码文件名，版本变化通过 Git 提交历史和 `CHANGELOG.md` 记录。
 - 编译文件、旧版本和参考代码与当前源码分开保存，避免误改或误发布。
 - 参考脚本的来源、许可和 Illustrator 版本兼容性需要在实际复用前单独确认。
+
+## 云漫标记集自动编译发布
+
+GitHub Actions 工作流位于 `.github/workflows/release-yunman.yml`，使用 Node.js 22 和锁定版本的 `jsxbin` 在 GitHub 托管的 Windows Runner 上生成标准 JSXBIN。
+
+- 在 Actions 页面手动运行时，只生成可下载的测试 Artifact，不创建 Release。
+- 推送 `v*` Tag 时，Tag 必须与源码窗口标题中的版本完全一致，例如源码为 `Ver 0.7.4.1` 时必须使用 `v0.7.4.1`。
+- Tag 构建成功后，工作流自动创建或更新同名 GitHub Release，并上传 `云漫标记集v<版本>.jsx` 及 SHA256 校验文件；文件内容是标准 JSXBIN，使用 `.jsx` 后缀以便 Illustrator 直接运行。
+- 自动产物未经 JsxBlind 二次混淆。需要更强混淆时，下载 `.jsx`，在本地运行 `tools/Adobe ExtendScript Toolkit CC/JsxBlindRun.jsx`，再把最终文件上传到对应 Release。
+- 工作流重新运行时只补传缺失资产，不覆盖 Release 中已有的同名文件，避免覆盖你手工上传的 JsxBlind 最终版本。
+
+本地也可以使用相同构建器：
+
+```powershell
+npm ci
+node tools/build-jsxbin.mjs `
+  --input "projects/云漫标记集/云漫标记集.jsx" `
+  --output "release/云漫标记集v0.7.4.1.jsx"
+```
