@@ -540,7 +540,7 @@ if (app.documents.length == 0) {
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.4"; 
+    dialog.text = "云漫标记集 Ver 0.7.4.1"; 
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
@@ -1245,10 +1245,14 @@ function createMark() {
     var midX = (left + right) / 2;
     var midY = (top + bottom) / 2;
     var expanded = getExpandedArtboardBounds();
-    placeHotStampMarksOnEdge(midX, top + markOffset + reticleLength, "h", expanded.left, expanded.right, topMarksGroup);
-    placeHotStampMarksOnEdge(midX, bottom - markOffset - reticleLength, "h", expanded.left, expanded.right, bottomMarksGroup);
-    placeHotStampMarksOnEdge(right + markOffset + reticleLength, midY, "v", expanded.bottom, expanded.top, rightMarksGroup);
-    placeHotStampMarksOnEdge(left - markOffset - reticleLength, midY, "v", expanded.bottom, expanded.top, leftMarksGroup);
+    // 沿画板长边生成：横版放上下，竖版及正方形沿用原分支放左右。
+    if (pw > ph) {
+        placeHotStampMarksOnEdge(midX, top + markOffset + reticleLength, "h", expanded.left, expanded.right, topMarksGroup);
+        placeHotStampMarksOnEdge(midX, bottom - markOffset - reticleLength, "h", expanded.left, expanded.right, bottomMarksGroup);
+    } else {
+        placeHotStampMarksOnEdge(right + markOffset + reticleLength, midY, "v", expanded.bottom, expanded.top, rightMarksGroup);
+        placeHotStampMarksOnEdge(left - markOffset - reticleLength, midY, "v", expanded.bottom, expanded.top, leftMarksGroup);
+    }
 }
 
 function getExpandedArtboardBounds() {
@@ -1760,19 +1764,22 @@ function createWhiteInkByHotStampRange(rectangleGroup, spotColor) {
     var rightX = right + markOffset + reticleLength;
     var leftX = left - markOffset - reticleLength;
 
-    var topParts = getHotStampEdgePositions(midX, topY, "h", expanded.left, expanded.right);
-    var bottomParts = getHotStampEdgePositions(midX, bottomY, "h", expanded.left, expanded.right);
-    var rightParts = getHotStampEdgePositions(rightX, midY, "v", expanded.bottom, expanded.top);
-    var leftParts = getHotStampEdgePositions(leftX, midY, "v", expanded.bottom, expanded.top);
-
-    addWhiteInkAlongPositions("h", topParts.low, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("h", topParts.high, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("h", bottomParts.low, 0, bottom - markOffset, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("h", bottomParts.high, 0, bottom - markOffset, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("v", leftParts.low, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("v", leftParts.high, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("v", rightParts.low, right + markOffset, 0, rectangleGroup, spotColor);
-    addWhiteInkAlongPositions("v", rightParts.high, right + markOffset, 0, rectangleGroup, spotColor);
+    // 白墨只跟随实际生成冷烫标记的长边，不再额外覆盖另外两边。
+    if (pw > ph) {
+        var topParts = getHotStampEdgePositions(midX, topY, "h", expanded.left, expanded.right);
+        var bottomParts = getHotStampEdgePositions(midX, bottomY, "h", expanded.left, expanded.right);
+        addWhiteInkAlongPositions("h", topParts.low, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("h", topParts.high, 0, top + stripWidth + markOffset, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("h", bottomParts.low, 0, bottom - markOffset, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("h", bottomParts.high, 0, bottom - markOffset, rectangleGroup, spotColor);
+    } else {
+        var rightParts = getHotStampEdgePositions(rightX, midY, "v", expanded.bottom, expanded.top);
+        var leftParts = getHotStampEdgePositions(leftX, midY, "v", expanded.bottom, expanded.top);
+        addWhiteInkAlongPositions("v", leftParts.low, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("v", leftParts.high, left - stripWidth - markOffset, 0, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("v", rightParts.low, right + markOffset, 0, rectangleGroup, spotColor);
+        addWhiteInkAlongPositions("v", rightParts.high, right + markOffset, 0, rectangleGroup, spotColor);
+    }
 }
 // 创建填充块
 function createRectangle(rectangleGroup, x, y, rectWidth, rectHeight, color) {
