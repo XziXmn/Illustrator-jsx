@@ -35,9 +35,9 @@
 
 GitHub Actions 工作流位于 `.github/workflows/release-yunman.yml`，使用 Node.js 22 和锁定版本的 `jsxbin` 在 GitHub 托管的 Windows Runner 上生成标准 JSXBIN。
 
-- 在 Actions 页面手动运行时，只生成可下载的测试 Artifact，不创建 Release。
+- 在 Actions 页面手动运行时，`release_tag` 留空只生成可下载的测试 Artifact；填写与源码版本对应的 Tag（例如 `v0.7.4.1`）可向该 Release 补传缺失资产。
 - 推送 `v*` Tag 时，Tag 必须与源码窗口标题中的版本完全一致，例如源码为 `Ver 0.7.4.1` 时必须使用 `v0.7.4.1`。
-- Tag 构建成功后，工作流自动创建或更新同名 GitHub Release，并上传 `云漫标记集v<版本>.jsx` 及 SHA256 校验文件；文件内容是标准 JSXBIN，使用 `.jsx` 后缀以便 Illustrator 直接运行。
+- Tag 构建成功后，工作流自动创建或更新同名 GitHub Release，并上传 `YunManMarks-v<版本>.jsx` 及 SHA256 校验文件；使用 ASCII 文件名避免 GitHub 清理中文后只剩版本号。文件内容是标准 JSXBIN，使用 `.jsx` 后缀以便 Illustrator 直接运行。
 - 自动产物未经 JsxBlind 二次混淆。需要更强混淆时，下载 `.jsx`，在本地运行 `tools/Adobe ExtendScript Toolkit CC/JsxBlindRun.jsx`，再把最终文件上传到对应 Release。
 - 工作流重新运行时只补传缺失资产，不覆盖 Release 中已有的同名文件，避免覆盖你手工上传的 JsxBlind 最终版本。
 
@@ -47,5 +47,5 @@ GitHub Actions 工作流位于 `.github/workflows/release-yunman.yml`，使用 N
 npm ci
 node tools/build-jsxbin.mjs `
   --input "projects/云漫标记集/云漫标记集.jsx" `
-  --output "release/云漫标记集v0.7.4.1.jsx"
+  --output "release/YunManMarks-v0.7.4.1.jsx"
 ```

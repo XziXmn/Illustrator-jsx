@@ -2,6 +2,11 @@ name: 构建并发布云漫标记集
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "可选：补传到已有 Release 的 Tag，例如 v0.7.4.1；留空则只生成 Artifact"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -38,6 +43,8 @@ jobs:
       - name: 读取并校验版本
         id: metadata
         shell: pwsh
+        env:
+          RELEASE_TAG_INPUT: ${{ github.event.inputs.release_tag }}
         run: |
           $sourcePath = "projects/云漫标记集/云漫标记集.jsx"
           $source = Get-Content -LiteralPath $sourcePath -Raw -Encoding UTF8
@@ -47,16 +54,20 @@ jobs:
           }
 
           $version = $versionMatch.Groups['version'].Value
+          $releaseTag = "$env:RELEASE_TAG_INPUT".Trim()
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
-              $expectedTag = "v$version"
-              if ($env:GITHUB_REF_NAME -ne $expectedTag) {
-                  throw "Tag $env:GITHUB_REF_NAME 与源码版本 $expectedTag 不一致。"
-              }
+              $releaseTag = $env:GITHUB_REF_NAME
           }
 
-          $assetName = "云漫标记集v$version.jsx"
+          $expectedTag = "v$version"
+          if ($releaseTag -and $releaseTag -ne $expectedTag) {
+              throw "目标 Tag $releaseTag 与源码版本 $expectedTag 不一致。"
+          }
+
+          $assetName = "YunManMarks-v$version.jsx"
           "version=$version" >> $env:GITHUB_OUTPUT
           "asset_name=$assetName" >> $env:GITHUB_OUTPUT
+          "release_tag=$releaseTag" >> $env:GITHUB_OUTPUT
 
       - name: 编译标准 JSXBIN
         shell: pwsh
@@ -75,13 +86,14 @@ jobs:
           if-no-files-found: error
 
       - name: 创建或更新 GitHub Release
-        if: github.ref_type == 'tag'
+        if: steps.metadata.outputs.release_tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           ASSET_NAME: ${{ steps.metadata.outputs.asset_name }}
+          RELEASE_TAG: ${{ steps.metadata.outputs.release_tag }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
+          $tag = $env:RELEASE_TAG
           $asset = "release/$env:ASSET_NAME"
           $checksum = "$asset.sha256"
 
