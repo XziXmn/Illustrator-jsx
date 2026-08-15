@@ -540,7 +540,7 @@ if (app.documents.length == 0) {
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.3.17"; 
+    dialog.text = "云漫标记集 Ver 0.7.4"; 
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
