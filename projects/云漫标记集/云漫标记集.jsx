@@ -532,15 +532,47 @@ if (typeof JSON !== "object") {
 ////////////////////////////////////////////////////////////JSON/////////////////////////////////////////////////////////////////
 
 var doc;
+var selectedSpotColorNames = [];
+var spotColorSelectorItems = [];
+
+// 已确认的自用专色名称库。
+// 界面仍显示 Illustrator 中的原始色板名，生成标识时才统一为常规名称/最小短码。
+// 未收录的专色不做猜测，保留原名；AutoCAD Color 4 在列表中直接排除。
+var spotColorNameLibrary = [
+    { aliases: ["PANTONE 1205 C", "1205c"], display: "1205c", compact: "1205c" },
+    { aliases: ["白墨", "White"], display: "白墨", compact: "W" },
+    { aliases: ["白墨2", "White2"], display: "白墨2", compact: "W2" },
+    { aliases: ["nixiang", "逆向", "纳米"], display: "纳米", compact: "SN" },
+    { aliases: ["烫金", "Gold Foil"], display: "烫金", compact: "GF" },
+    { aliases: ["烫银", "冷烫银", "Silver Foil"], display: "烫银", compact: "SF" },
+    { aliases: ["烫色", "Color Foil"], display: "烫色", compact: "CF" },
+    { aliases: ["消光", "Matte"], display: "消光", compact: "SM" },
+    { aliases: ["专红", "Spot Red"], display: "专红", compact: "SR" },
+    { aliases: ["专黄", "Spot Yellow"], display: "专黄", compact: "SY" },
+    { aliases: ["橙色", "Orange"], display: "橙色", compact: "SO" },
+    { aliases: ["绿色", "Green"], display: "绿色", compact: "SG" },
+    { aliases: ["紫色", "Violet"], display: "紫色", compact: "SV" }
+];
+
 if (app.documents.length == 0) {
     alert("请先建立一个新文件", "错误");
-    app.documents.add();
+    try {
+        doc = app.documents.add();
+    } catch (e) {
+        doc = null;
+    }
+} else {
+    try {
+        doc = app.activeDocument;
+    } catch (e) {
+        doc = null;
+    }
 }
     
 // DIALOG
 // ======
 var dialog = new Window("dialog"); 
-    dialog.text = "云漫标记集 Ver 0.7.4.3";
+    dialog.text = "云漫标记集 Ver 0.7.4.4";
     dialog.alignChildren = ["center","center"]; 
     dialog.spacing = 10; 
     dialog.margins = 23; 
@@ -670,19 +702,6 @@ var Bisector = Panel_1.add("checkbox", undefined, undefined, {name: "Bisector"})
 var Grating = Panel_1.add("checkbox", undefined, undefined, {name: "Grating"}); 
     Grating.text = "对位线"; 
 
-// COMMENTPANEL
-// ============
-var Commentpanel = group1.add("panel", undefined, undefined, {name: "Commentpanel"}); 
-    Commentpanel.text = "文档备注"; 
-    Commentpanel.preferredSize.width = 148; 
-    Commentpanel.orientation = "column"; 
-    Commentpanel.alignChildren = ["left","top"]; 
-    Commentpanel.spacing = 10; 
-    Commentpanel.margins = 10; 
-
-var Comment_text = Commentpanel.add('edittext {properties: {name: "Comment_text"}}'); 
-    Comment_text.preferredSize.width = 120; 
-
 // GENERALGROUP1_2
 // ===============
 var GeneralGroup1_2 = GeneralGroup1.add("group", undefined, {name: "GeneralGroup1_2"}); 
@@ -800,6 +819,45 @@ var spacing_2 = Bisectorgroup_4.add('edittext {properties: {name: "spacing_2"}}'
     spacing_2.text = 6; 
     spacing_2.preferredSize.width = 40; 
 
+// BOTTOMGROUP
+// ===========
+// 备注与专色选择属于生成前的补充信息，放在主参数区下方保持同一层级。
+var BottomGroup = dialog.add("group", undefined, {name: "BottomGroup"});
+    BottomGroup.orientation = "row";
+    BottomGroup.alignChildren = ["left", "top"];
+    BottomGroup.spacing = 10;
+    BottomGroup.margins = 0;
+
+// COMMENTPANEL
+// ============
+var Commentpanel = BottomGroup.add("panel", undefined, undefined, {name: "Commentpanel"});
+    Commentpanel.text = "文档备注";
+    Commentpanel.preferredSize.width = 148;
+    Commentpanel.orientation = "column";
+    Commentpanel.alignChildren = ["left", "top"];
+    Commentpanel.spacing = 10;
+    Commentpanel.margins = 10;
+
+var Comment_text = Commentpanel.add('edittext {properties: {name: "Comment_text"}}');
+    Comment_text.preferredSize.width = 120;
+
+// SPOTCOLORPANEL
+// ===============
+var spotColorSelectionPanel = BottomGroup.add("panel", undefined, undefined, {name: "spotColorSelectionPanel"});
+    spotColorSelectionPanel.text = "专色";
+    spotColorSelectionPanel.helpTip = "勾选后加入标识";
+    spotColorSelectionPanel.preferredSize.width = 148;
+    spotColorSelectionPanel.orientation = "row";
+    spotColorSelectionPanel.alignChildren = ["left", "center"];
+    spotColorSelectionPanel.spacing = 6;
+    spotColorSelectionPanel.margins = 10;
+
+var spotColorSelectionGroup = spotColorSelectionPanel.add("group", undefined, {name: "spotColorSelectionGroup"});
+    spotColorSelectionGroup.orientation = "column";
+    spotColorSelectionGroup.alignChildren = ["left", "top"];
+    spotColorSelectionGroup.spacing = 6;
+    spotColorSelectionGroup.margins = 0;
+
 // BUTTONGROUP1
 // ============
 var buttongroup1 = dialog.add("group", undefined, {name: "buttongroup1"}); 
@@ -814,11 +872,30 @@ var ok = buttongroup1.add("button", undefined, undefined, {name: "ok"});
 var cancel = buttongroup1.add("button", undefined, undefined, {name: "cancel"}); 
     cancel.text = "取消"; 
 
-doc = app.activeDocument;
+if (!doc && app.documents.length > 0) {
+    try {
+        doc = app.activeDocument;
+    } catch (e) {
+        doc = null;
+    }
+}
+
+initializeSpotColorSelector(doc);
+PrintingColorSeparation.onClick = function () {
+    spotColorSelectionPanel.enabled = PrintingColorSeparation.value;
+    for (var i = 0; i < spotColorSelectorItems.length; i++) {
+        spotColorSelectorItems[i].control.enabled = PrintingColorSeparation.value;
+    }
+};
 
 // 记录脚本启动时是否以“选中对象”为目标。
 // 后续会取消对象选择，因此不能再依赖 doc.selection.length 判断该模式。
-var selectionMode = app.activeDocument.selection.length > 0;
+var selectionMode = false;
+try {
+    selectionMode = !!(doc && doc.selection && doc.selection.length > 0);
+} catch (e) {
+    selectionMode = false;
+}
 
 if (selectionMode) {
     dialog.text = dialog.text + "（已选中对象）";
@@ -844,7 +921,7 @@ positionDropdown.onChange = function(e) {
         PrintingCornerLine.value = false;
         PrintingCornerLine.enabled = false;
     } else {
-        if(app.activeDocument.selection.length <= 0) {
+        if (!selectionMode) {
             AdaptiveArtboard.enabled = true;
         }
         PrintingCornerLine.enabled = true;
@@ -931,7 +1008,6 @@ function saveStoredParams(file, data) {
 }
 
 var params = {
-    "verifyWhetherDocumentMonochrome" : false,
     "lineWidthInputEnabled" : lineWidthInput.enabled
 }
 var savedParams = loadStoredParams(storageFile);
@@ -982,6 +1058,7 @@ ok.onClick = function() {
         return;
     }
 
+    collectSelectedSpotColorNames();
     validatedInputs = {
         markAreaMM: markAreaMM,
         offsetMM: offsetMM,
@@ -996,10 +1073,27 @@ ok.onClick = function() {
 
 dialog.center();
 var myReturn = dialog.show();
-if (myReturn == true) {
+var activeDocumentForRun = null;
+var originalActiveLayer = null;
+var originalActiveArtboardIndex = -1;
+var documentContextReady = false;
+try {
+    // 对话框显示期间可能关闭了原文档，生成前重新获取当前文档。
+    if (myReturn == true && app.documents.length > 0) {
+        activeDocumentForRun = app.activeDocument;
+        if (activeDocumentForRun) {
+            originalActiveLayer = activeDocumentForRun.activeLayer;
+            originalActiveArtboardIndex = activeDocumentForRun.artboards.getActiveArtboardIndex();
+            documentContextReady = true;
+        }
+    }
+} catch (e) {
+    activeDocumentForRun = null;
+    documentContextReady = false;
+}
+if (myReturn == true && documentContextReady) {
+    doc = activeDocumentForRun;
     var aiver = app.version;
-    var originalActiveLayer = doc.activeLayer;
-    var originalActiveArtboardIndex = doc.artboards.getActiveArtboardIndex();
     var pointTomm = 2.83464566929134;
     var markArea = validatedInputs.markAreaMM * pointTomm; // 用户输入的大小
     var markOffset = direction.value
@@ -1014,10 +1108,9 @@ if (myReturn == true) {
     var stripWidth = markArea; // 白底厚度与标记区域一致，不向纸张外缘额外扩展
     var compensation = markOffset + markRadius * 2; // 宽度补偿
 
-    var documentColorSpace, documentMonochrome;
-    // 文档专色识别/专色名称输出当前不可用，统一暂停。
-    // 注意：冷烫白墨仍使用名为 White 的专色色板实现，不受此开关影响。
-    var documentSpotColorInfoEnabled = false;
+    var documentColorSpace;
+    // 不自动判断图稿实际使用的专色；专色完全由用户在界面中手动勾选。
+    var documentMonochrome = { isMonochrome: false, color: null };
     var fonts = app.textFonts; // 字体信息
     var infoTextFont = getPreferredInfoFont(fonts);
     var fontSize = 9; // 字体大小
@@ -1035,8 +1128,7 @@ if (myReturn == true) {
         leftMarksGroup, cornerMarkGroup, textGroup, alignmentLineGroup;
     var documentInformationTextContent, dimensionInformationTextContent;
 
-    var spotColorBeingUsedSet = {}; // 文档中使用的专色信息
-    var spotColorInfo = []; // 文档中存在的专色信息
+    var spotColorInfo = getSelectedSpotColorInfo(doc, selectedSpotColorNames);
 
     // 冷烫信息布局异常统一收集，避免多画板时连续弹窗。
     var layoutWarnings = [];
@@ -1051,14 +1143,6 @@ if (myReturn == true) {
     
     // 获取文档颜色模式
     documentColorSpace = doc.documentColorSpace;
-    if (documentSpotColorInfoEnabled) {
-        for (var i = 0, len = doc.spots.length; i < len; i++) {
-            // 套版色不存入
-            if ("[套版色]" != doc.spots[i].name) {
-                spotColorInfo.push(getSpotColorInfo(doc.spots[i]));
-            }
-        }
-    }
 
     var markLayerName = "标记图层";
     var markLayer = getLayerByName(markLayerName);
@@ -1080,10 +1164,6 @@ if (myReturn == true) {
 
             // 获取文档中的套版色
             var processColors = doc.swatches[1].color;
-            // 文档专色信息暂停期间，不执行单色/专色使用情况扫描。
-            documentMonochrome = documentSpotColorInfoEnabled
-                ? isDocumentMonochrome()
-                : { isMonochrome: false, color: null };
 
             if (doc.selection.length > 0) {
                 currentLayoutContext = "选中对象";
@@ -1140,11 +1220,12 @@ if (myReturn == true) {
         restoreDocumentContext(doc, originalActiveLayer, originalActiveArtboardIndex);
     }
 
-    params.verifyWhetherDocumentMonochrome = false;
     params.lineWidthInputEnabled = lineWidthInput.enabled;
 
     // 保存参数到本地文件
     saveStoredParams(storageFile, params);
+} else if (myReturn == true) {
+    alert("当前没有可用文档，已取消生成。", "错误");
 }
 
 function main() {
@@ -1240,6 +1321,7 @@ function main() {
     }
 
 }
+
 // 创建识别标识：四边都生成；中点留给角线，向两边每 30mm 铺一颗，距扩展后边角不足 30mm 则停
 function createMark() {
     var midX = (left + right) / 2;
@@ -2388,7 +2470,7 @@ function fitHotStampSecondaryInfo(frame, zone, pageText, dateText) {
     return false;
 }
 
-// 冷烫模式备注：固定使用左上角剩余区。优先单行，其次两行，最后才截短。
+// 冷烫模式备注：使用布局分配的外围信息区。优先单行，其次两行，最后才截短。
 function fitHotStampCommentInfo(frame, zone, commentText) {
     var label = "备注: ";
     var sizes = [9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5];
@@ -2449,11 +2531,17 @@ function getHotStampInfoLayout() {
     var rightZones = getHotStampRightInfoZones();
     return {
         rotation: 270,
-        comment: { zone: leftZones.high, hAlign: "center", vAlign: "top" },
-        secondary: { zone: rightZones.high, hAlign: "center", vAlign: "top" },
-        color: { zone: leftZones.low, hAlign: "center", vAlign: "bottom" },
-        main: { zone: rightZones.low, hAlign: "center", vAlign: "bottom" }
+        // 横版整体顺时针旋转 90°：左上→右上，右上→右下，左下→左上，右下→左下。
+        comment: { zone: rightZones.high, hAlign: "center", vAlign: "top" },
+        secondary: { zone: rightZones.low, hAlign: "center", vAlign: "bottom" },
+        color: { zone: leftZones.high, hAlign: "center", vAlign: "top" },
+        main: { zone: leftZones.low, hAlign: "center", vAlign: "bottom" }
     };
+}
+
+// 分色标识跟随四角旋转布局；备注在竖版右上，不再占用左上专色区。
+function getHotStampColorLayout(layout) {
+    return layout.color;
 }
 
 function rotateHotStampInfoFrame(frame, rotation) {
@@ -2470,7 +2558,7 @@ function createHotStampText() {
     var secondaryLayout = layout.secondary;
     var mainLayout = layout.main;
 
-    // 右下角：文件名 + 尺寸。
+    // 文件名 + 尺寸，位置由横/竖版旋转布局决定。
     var mainFrame = textGroup.textFrames.add();
     mainFrame.name = "documentInformationText";
     mainFrame.contents = "文件名: " + filename + " 尺寸: " + sizeText;
@@ -2489,7 +2577,7 @@ function createHotStampText() {
         mainFrame.remove();
     }
 
-    // 右上角：单画板只显示“日期:”；多画板显示“总页数-当前页 日期: ...”。
+    // 日期信息，位置由横/竖版旋转布局决定；单画板只显示“日期:”，多画板显示“总页数-当前页 日期: ...”。
     // 页码仍然不加“页码:”字段。
     var secondaryFrame = textGroup.textFrames.add();
     secondaryFrame.name = "hotStampSecondaryInformationText";
@@ -2508,7 +2596,7 @@ function createHotStampText() {
         secondaryFrame.remove();
     }
 
-    // 左上角：只有填写了文档备注时才生成。
+    // 备注信息，位置由横/竖版旋转布局决定；只有填写了文档备注时才生成。
     if (Comment_text.text) {
         var commentFrame = textGroup.textFrames.add();
         commentFrame.name = "hotStampCommentInformationText";
@@ -2534,17 +2622,45 @@ function appendStyledPart(record, text, color) {
     record.ranges.push({ start: start, end: record.text.length, color: color });
 }
 
+function normalizeSpotColorLookupName(name) {
+    return String(name == null ? "" : name)
+        .replace(/^\s+|\s+$/g, "")
+        .toLowerCase();
+}
+
+function findSpotColorNameEntry(name) {
+    var normalized = normalizeSpotColorLookupName(name);
+    var i;
+    var j;
+
+    for (i = 0; i < spotColorNameLibrary.length; i++) {
+        for (j = 0; j < spotColorNameLibrary[i].aliases.length; j++) {
+            if (normalizeSpotColorLookupName(spotColorNameLibrary[i].aliases[j]) === normalized) {
+                return spotColorNameLibrary[i];
+            }
+        }
+    }
+
+    return null;
+}
+
+function getSpotColorLabel(name, compact) {
+    var entry = findSpotColorNameEntry(name);
+    if (!entry) return String(name == null ? "" : name);
+    return compact ? entry.compact : entry.display;
+}
+
+function isIgnoredSpotColorName(name) {
+    return normalizeSpotColorLookupName(name) === "autocad color 4";
+}
+
 function getMonochromeTextColor() {
     var color = documentMonochrome.color;
     if (spotColorInfo.length > 0) {
-        for (var h = 0; h < spotColorInfo.length; h++) {
-            if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
-                var spotColor = new SpotColor();
-                spotColor.spot = doc.spots.getByName(spotColorInfo[h].name);
-                spotColor.tint = 100;
-                return spotColor;
-            }
-        }
+        var spotColor = new SpotColor();
+        spotColor.spot = doc.spots.getByName(spotColorInfo[0].name);
+        spotColor.tint = 100;
+        return spotColor;
     }
     return color;
 }
@@ -2565,13 +2681,13 @@ function buildHotStampColorRecord(level) {
     for (var i = 0; i < 4; i++) appendStyledPart(record, labels[i], mCMYK[i]);
 
     for (var h = 0; h < spotColorInfo.length; h++) {
-        if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
-            var sc = new SpotColor();
-            sc.spot = doc.spots.getByName(spotColorInfo[h].name);
-            sc.tint = 100;
-            var spotName = level === 0 ? ("(" + spotColorInfo[h].name + ")") : spotColorInfo[h].name;
-            appendStyledPart(record, spotName, sc);
-        }
+        var sc = new SpotColor();
+        sc.spot = doc.spots.getByName(spotColorInfo[h].name);
+        sc.tint = 100;
+        // 普通层级保留专色库中的中文名称；压缩层级切换到最小英文短码。
+        // 普通标识和冷烫标识共用同一套名称规则，不添加括号。
+        var spotName = getSpotColorLabel(spotColorInfo[h].name, level >= 2);
+        appendStyledPart(record, spotName, sc);
     }
     return record;
 }
@@ -2604,20 +2720,18 @@ function buildHotStampColorRecordMultiline() {
 
     var hasSpot = false;
     for (var h = 0; h < spotColorInfo.length; h++) {
-        if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
-            if (!hasSpot) {
-                record.text += "\r";
-                hasSpot = true;
-            } else {
-                record.text += " ";
-            }
-            var sc = new SpotColor();
-            sc.spot = doc.spots.getByName(spotColorInfo[h].name);
-            sc.tint = 100;
-            var start = record.text.length;
-            record.text += spotColorInfo[h].name;
-            record.ranges.push({ start: start, end: record.text.length, color: sc });
+        if (!hasSpot) {
+            record.text += "\r";
+            hasSpot = true;
+        } else {
+            record.text += " ";
         }
+        var sc = new SpotColor();
+        sc.spot = doc.spots.getByName(spotColorInfo[h].name);
+        sc.tint = 100;
+        var start = record.text.length;
+        record.text += getSpotColorLabel(spotColorInfo[h].name, false);
+        record.ranges.push({ start: start, end: record.text.length, color: sc });
     }
 
     return record;
@@ -2704,10 +2818,10 @@ function placeMinimalCMYK(frame, preferredZone, hAlign, vAlign) {
 }
 
 function createHotStampColorInfo() {
-    // 冷烫模式固定使用左下角信息区，并随长边方向旋转。
+    // 冷烫模式使用四角旋转布局中的专色区。
     // CMYK 是唯一强制保留项；中文色名和专色名称放不下时可逐级省略。
     var layout = getHotStampInfoLayout();
-    var colorLayout = layout.color;
+    var colorLayout = getHotStampColorLayout(layout);
 
     var frame = textGroup.textFrames.add();
     frame.name = "hotStampColorInformationText";
@@ -2723,10 +2837,10 @@ function createHotStampColorInfo() {
         if (placeFrameInZone(frame, colorLayout.zone, colorLayout.hAlign, colorLayout.vAlign)) return;
     }
 
-    // 最终只保留 CMYK，并继续限制在左下外围标识区内。
+    // 最终只保留 CMYK，并继续限制在专色布局对应的外围标识区内。
     // 不弹窗；其它信息本就允许省略，批量生成不应被正常降级打断。
     if (!placeMinimalCMYK(frame, colorLayout.zone, colorLayout.hAlign, colorLayout.vAlign)) {
-        addLayoutWarning("极端小版面：CMYK 标识也无法在左下外围标识区安全放置，已省略。 ");
+        addLayoutWarning("极端小版面：CMYK 标识也无法在专色布局对应的外围标识区安全放置，已省略。 ");
         frame.remove();
     }
 }
@@ -2837,14 +2951,16 @@ function createTextLegacy () {
 function colornameLegacy() {
     var textRef = textGroup.textFrames.add();
     var rotationAngle = 0;
-    if (documentMonochrome.isMonochrome) {
-        textRef.contents = "单色(COLOUR)";
-    } else {
-        textRef.contents = "青色(C) 洋红(M) 黄色(Y) 黑色(K) ";
-    }
+
+    // CMYK 与手动勾选的专色必须共用一个文字框。
+    // 坐标和旋转仍沿用旧版普通模式，避免专色被单独推到另一条基线。
+    var colorRecord = buildHotStampColorRecord(0);
+    textRef.contents = colorRecord.text;
     textRef.textRange.characterAttributes.size = fontSize;
     textRef.textRange.characterAttributes.textFont = infoTextFont;
-    var textWidth = textRef.width;
+    textRef.textRange.characterAttributes.fillColor = processColors;
+    applyStyledColors(textRef, colorRecord);
+
     if (pw > ph) {
         if(direction.value) {
             if (hotStampingMark.value) {
@@ -2881,110 +2997,130 @@ function colornameLegacy() {
 
         rotationAngle = 270;
     }
-    var spotColor = new SpotColor();
-    if (documentMonochrome.isMonochrome) {
-        if (spotColorInfo.length > 0) {
-            for (var h = 0; h < spotColorInfo.length; h++) {
-                if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
-                    spotColor.spot = doc.spots.getByName(spotColorInfo[h].name);
-                    spotColor.tint = 100;
-                    textRef.textRange.characterAttributes.fillColor = spotColor;
-                } else {
-                    // 如果没有对应的专色，那么就是普通色
-                    textRef.textRange.characterAttributes.fillColor = documentMonochrome.color;
-                }
-            }
-        } else {
-            // 如果没有专色，直接普通色
-            textRef.textRange.characterAttributes.fillColor = documentMonochrome.color;
-        }
-    } else {
-        for (var i = 0; i <= 5; i += 1) {
-            textRef.textRange.characters[i].characterAttributes.fillColor = mCMYK[0];
-        }
-        for (var i = 6; i <= 11; i += 1) {
-            textRef.textRange.characters[i].characterAttributes.fillColor = mCMYK[1];
-        }
-        for (var i = 12; i <= 17; i += 1) {
-            textRef.textRange.characters[i].characterAttributes.fillColor = mCMYK[2];
-        }
-        for (var i = 18; i <= 22; i += 1) {
-            textRef.textRange.characters[i].characterAttributes.fillColor = mCMYK[3];
-        }
-    }
+
     if (rotationAngle !== 0) {
         textRef.rotate(rotationAngle, true, true, true, true, Transformation.TOPLEFT);
     }
     textHeight = textRef.textRange.characterAttributes.size * 0.3528 * pointTomm;
-    
-    if (!documentMonochrome.isMonochrome) {
-        if (spotColorInfo.length > 0) {
-            var widthPreviousText = 0;
-            for (var h = 0; h < spotColorInfo.length; h++) {
-                if (spotColorBeingUsedSet[getColorString(spotColorInfo[h])]) {
-                    spotColor.spot = doc.spots.getByName(spotColorInfo[h].name);
-                    spotColor.tint = 100;
-                    var spotNametextRef = textGroup.textFrames.add();
-                    spotNametextRef.contents = "(" + spotColorInfo[h].name + ") ";
-                    spotNametextRef.textRange.characterAttributes.size = fontSize;
-                    spotNametextRef.textRange.characterAttributes.textFont = infoTextFont;
-                    spotNametextRef.textRange.characterAttributes.fillColor = spotColor;
-                    if (pw > ph) {
-                        if(direction.value) {
-                            if (hotStampingMark.value) {
-                                spotNametextRef.top = y;
-                            } else {
-                                spotNametextRef.top = y - reticleLength;
-                            }
-                            spotNametextRef.left = x + textWidth + widthPreviousText;
-                        } else {
-                            if (hotStampingMark.value) {
-                                spotNametextRef.top = y - markOffset - markArea;
-                            } else {
-                                spotNametextRef.top = y - markOffset / 2 - reticleLength;
-                            }
-                            spotNametextRef.left = x + markArea + textWidth + widthPreviousText;
-                        }
-                        rotationAngle = 0;
-                    } else {
-                        if(direction.value) {
-                            if (hotStampingMark.value) {
-                                spotNametextRef.left = x;
-                            } else {
-                                spotNametextRef.left = x - reticleLength;
-                            }
-                            spotNametextRef.top = y + ph - textWidth - widthPreviousText;
-                        } else {
-                            if (hotStampingMark.value) {
-                                spotNametextRef.left = x - markOffset - markArea;
-                            } else {
-                                spotNametextRef.left = x - markOffset / 2 - reticleLength;
-                            }
-                            spotNametextRef.top = y + ph - markArea - textWidth - widthPreviousText;
-                        }
-                        rotationAngle = 270;
-                    }
-                    widthPreviousText = spotNametextRef.width;
-                    if (rotationAngle !== 0) {
-                        spotNametextRef.rotate(rotationAngle, true, true, true, true, Transformation.TOPLEFT);
-                    }
-                }
-            }
+}
+function initializeSpotColorSelector(documentRef) {
+    var spots = documentRef ? getSelectableSpotColors(documentRef) : [];
+    if (spots.length === 0) {
+        spotColorSelectionGroup.add("statictext", undefined, documentRef ? "无专色" : "无可用文档");
+        return;
+    }
+
+    // 面板宽度固定为 148pt；专色多时按控件实际宽度自动分行，避免撑大对话框。
+    var maxRowWidth = 126;
+    var rowSpacing = spotColorSelectionGroup.spacing;
+    var currentRow = null;
+    var currentRowWidth = 0;
+    for (var i = 0; i < spots.length; i++) {
+        if (!currentRow) {
+            currentRow = spotColorSelectionGroup.add("group");
+            currentRow.orientation = "row";
+            currentRow.alignChildren = ["left", "center"];
+            currentRow.spacing = rowSpacing;
+            currentRow.margins = 0;
+        }
+
+        var checkbox = currentRow.add("checkbox", undefined, spots[i].name);
+        var checkboxWidth = getSpotColorControlWidth(checkbox, spots[i].name);
+        if (currentRowWidth > 0 && currentRowWidth + rowSpacing + checkboxWidth > maxRowWidth) {
+            currentRow.remove(checkbox);
+            currentRow = spotColorSelectionGroup.add("group");
+            currentRow.orientation = "row";
+            currentRow.alignChildren = ["left", "center"];
+            currentRow.spacing = rowSpacing;
+            currentRow.margins = 0;
+            currentRowWidth = 0;
+            checkbox = currentRow.add("checkbox", undefined, spots[i].name);
+            checkboxWidth = getSpotColorControlWidth(checkbox, spots[i].name);
+        }
+
+        checkbox.helpTip = "勾选后将“" + spots[i].name + "”加入标记。";
+        checkbox.value = false;
+        spotColorSelectorItems.push({ name: spots[i].name, spot: spots[i], control: checkbox });
+        currentRowWidth += (currentRowWidth > 0 ? rowSpacing : 0) + checkboxWidth;
+    }
+}
+
+function getSpotColorControlWidth(control, name) {
+    var preferredWidth = control.preferredSize && control.preferredSize.width;
+    if (preferredWidth && preferredWidth > 0) return preferredWidth;
+
+    // 某些 Illustrator 版本在布局完成前不会返回 preferredSize，使用保守估算兜底。
+    var width = 24;
+    var text = String(name);
+    for (var i = 0; i < text.length; i++) {
+        width += text.charCodeAt(i) > 255 ? 12 : 7;
+    }
+    return width;
+}
+
+function getSelectableSpotColors(documentRef) {
+    var spots = [];
+    var seenNames = [];
+
+    // 先从色板读取 SpotColor，兼容部分 Illustrator 版本中 doc.spots 过滤结果不完整的情况。
+    for (var i = 0; i < documentRef.swatches.length; i++) {
+        var swatch = documentRef.swatches[i];
+        if (!swatch.color || swatch.color.typename !== "SpotColor" || !swatch.color.spot) continue;
+        var swatchSpot = swatch.color.spot;
+        if (swatchSpot.colorType === ColorModel.REGISTRATION
+            || isIgnoredSpotColorName(swatchSpot.name)
+            || containsSpotName(seenNames, swatchSpot.name)) continue;
+        seenNames.push(swatchSpot.name);
+        spots.push(swatchSpot);
+    }
+
+    // 色板没有返回时，再从官方 Spots 集合补充；这里不判断专色是否实际用于图稿。
+    for (var j = 0; j < documentRef.spots.length; j++) {
+        var spot = documentRef.spots[j];
+        if (spot.colorType === ColorModel.REGISTRATION
+            || isIgnoredSpotColorName(spot.name)
+            || containsSpotName(seenNames, spot.name)) continue;
+        seenNames.push(spot.name);
+        spots.push(spot);
+    }
+    return spots;
+}
+
+function containsSpotName(names, name) {
+    for (var i = 0; i < names.length; i++) {
+        if (names[i] === name) return true;
+    }
+    return false;
+}
+
+function collectSelectedSpotColorNames() {
+    selectedSpotColorNames = [];
+    for (var i = 0; i < spotColorSelectorItems.length; i++) {
+        if (spotColorSelectorItems[i].control.value) {
+            selectedSpotColorNames.push(spotColorSelectorItems[i].name);
         }
     }
 }
-// 获取分色信息
+
+function getSelectedSpotColorInfo(documentRef, selectedNames) {
+    var selectedInfo = [];
+    var spots = getSelectableSpotColors(documentRef);
+    for (var i = 0; i < spots.length; i++) {
+        if (containsSpotName(selectedNames, spots[i].name)) {
+            selectedInfo.push(getSpotColorInfo(spots[i]));
+        }
+    }
+    return selectedInfo;
+}
+
+// 获取分色信息。只保留通用属性，避免把 LAB/RGB 专色误当成 CMYK 读取。
 function getSpotColorInfo(spotColor) {
     return {
-      color: spotColor.color,
-      name: spotColor.name,
-      kind: spotColor.spotKind,
-      typename: spotColor.typename,
-      colorType: spotColor.color.typename,
-      cyan: spotColor.color.cyan,
-      magenta: spotColor.color.magenta,
-      yellow: spotColor.color.yellow,
-      black: spotColor.color.black,
+        color: spotColor.color,
+        name: spotColor.name,
+        kind: spotColor.spotKind,
+        typename: spotColor.typename,
+        colorType: spotColor.colorType
     };
 }
 // 获取图层
@@ -3093,79 +3229,6 @@ function modifyTextFrame(group, textName, newText) {
                 break;
             }
         }
-    }
-}
-// 判断是否为单色
-function isDocumentMonochrome() {
-    var colorSet = {};
-    var colorCount = 0;
-    var monochromeColor = processColors;
-    if (params.verifyWhetherDocumentMonochrome) {
-        for (var i = 0, len = doc.pathItems.length; i < len; i++) {
-            var item = doc.pathItems[i];
-            // 填充颜色
-            if (item.filled && item.fillColor.typename !== "NoColor") {
-                var fillColor = getColorString(item.fillColor);
-                // 如果颜色不存在于 colorSet 中，则添加并计数
-                if (!colorSet[fillColor]) {
-                    colorSet[fillColor] = true;
-                    colorCount++;
-                    monochromeColor = item.fillColor;
-                    if (item.fillColor.typename === "SpotColor") {
-                        // 判断是否套版色
-                        if (ColorModel.REGISTRATION !== item.fillColor.spot.colorType) {
-                            spotColorBeingUsedSet[fillColor] = true;
-                        } else {
-                            colorSet[fillColor] = false;
-                            colorCount--;
-                            monochromeColor = processColors;
-                        }
-                    }
-                }
-            }
-            // 描边颜色
-            if (item.stroked && item.strokeColor.typename !== "NoColor") {
-                var strokeColor = getColorString(item.strokeColor);
-                // 如果颜色不存在于 colorSet 中，则添加并计数
-                if (!colorSet[strokeColor]) {
-                    colorSet[strokeColor] = true;
-                    colorCount++;
-                    monochromeColor = item.strokeColor;
-                    if (item.strokeColor.typename === "SpotColor") {
-                        // 判断是否套版色
-                        if (ColorModel.REGISTRATION !== item.strokeColor.spot.colorType) {
-                            spotColorBeingUsedSet[strokeColor] = true;
-                        } else {
-                            colorSet[strokeColor] = false;
-                            colorCount--;
-                            monochromeColor = processColors;
-                        }
-                    }
-                }
-            }
-        }
-        if (colorCount > 1) {
-            return { isMonochrome: false, color: null };
-        } else {
-            return { isMonochrome: true, color: monochromeColor };
-        }
-    }
-    return { isMonochrome: false, color: null };
-}
-// 返回色彩字符串
-function getColorString(color) {
-    if (color.typename === "RGBColor") {
-        return "RGB(" + color.red + "," + color.green + "," + color.blue + ")";
-    } else if (color.typename === "CMYKColor") {
-        return "CMYK(" + color.cyan + "," + color.magenta + "," + color.yellow + "," + color.black + ")";
-    } else if (color.typename === "GrayColor") {
-        return "Gray(" + color.gray + ")";
-    } else if (color.typename === "SpotColor") {
-        return "SPOT(" + color.spot.color.cyan + "," + color.spot.color.magenta + "," + color.spot.color.yellow + "," + color.spot.color.black + ")";
-    } else if (color.typename === "Spot") {
-        return "SPOT(" + color.color.cyan + "," + color.color.magenta + "," + color.color.yellow + "," + color.color.black + ")";
-    } else {
-        return "OtherColor";
     }
 }
 // 判断专色是否存在的函数

@@ -18,7 +18,7 @@ function Assert-NotContains([string]$Text, [string]$Forbidden, [string]$Label) {
     }
 }
 
-Assert-Contains $content '云漫标记集 Ver 0.7.4.3' '版本号'
+Assert-Contains $content '云漫标记集 Ver 0.7.4.4' '版本号'
 Assert-Contains $content '["青(C)", "红(M)", "黄(Y)", "黑(K)"]' '紧凑 CMYK 中文标签'
 Assert-NotContains $content '洋(M)' '错误的紧凑洋红标签'
 Assert-Contains $content 'markAreaMM < 4 || offsetMM < 0' '标记大小和偏移下限'
@@ -31,8 +31,42 @@ Assert-Contains $content 'var bandBottom = top + markOffset + crossPad;' '顶部
 Assert-Contains $content '避免“fit=true 但 place=false”导致文字被删除' 'fit/place 一致性修复'
 Assert-Contains $content 'var epsilon = 0.03 * pointTomm;' '多画板坐标舍入容差'
 Assert-Contains $content 'function getHotStampInfoLayout()' '冷烫信息长边方向布局'
+Assert-Contains $content 'function getHotStampColorLayout(layout)' '竖版冷烫色标落位'
+Assert-Contains $content 'var colorLayout = getHotStampColorLayout(layout);' '冷烫色标落位接入'
 Assert-Contains $content 'rotateHotStampInfoFrame(mainFrame, layout.rotation);' '冷烫信息旋转'
-Assert-Contains $content 'var documentSpotColorInfoEnabled = false;' '文档专色信息暂停开关'
+Assert-Contains $content 'var BottomGroup = dialog.add("group"' '底部信息分组'
+Assert-Contains $content 'var Commentpanel = BottomGroup.add("panel"' '备注底部布局'
+Assert-Contains $content 'var spotColorSelectionPanel = BottomGroup.add("panel"' '专色选择分组面板'
+Assert-Contains $content 'var spotColorSelectionGroup = spotColorSelectionPanel.add("group"' '横向专色选择区'
+Assert-Contains $content 'spotColorSelectionGroup.orientation = "column"' '专色选择自动换行容器'
+Assert-Contains $content 'function getSpotColorControlWidth(control, name)' '专色控件宽度测量'
+Assert-Contains $content 'currentRow.remove(checkbox)' '专色换行重排'
+Assert-Contains $content 'Panel_1.preferredSize.width = 148' '左侧参数区宽度'
+Assert-Contains $content 'Panel_2.preferredSize.width = 148' '右侧选项区宽度'
+Assert-Contains $content 'Panel_3.preferredSize.width = 148' '等分线区宽度'
+Assert-Contains $content 'spotColorSelectionPanel.preferredSize.width = 148' '专色选择区宽度'
+Assert-Contains $content 'spotColorSelectionPanel.text = "专色"' '专色区短标题'
+Assert-Contains $content 'function getSelectableSpotColors(documentRef)' '文档专色列表'
+Assert-Contains $content 'swatch.color.typename !== "SpotColor"' '色板专色读取'
+Assert-Contains $content 'var checkbox = currentRow.add("checkbox"' '专色勾选控件'
+Assert-Contains $content 'function collectSelectedSpotColorNames()' '专色勾选结果收集'
+Assert-Contains $content 'var spotColorInfo = getSelectedSpotColorInfo(doc, selectedSpotColorNames);' '手动选择专色接入标记'
+Assert-Contains $content 'var documentContextReady = false;' '生成前文档上下文预检'
+Assert-Contains $content 'if (myReturn == true && documentContextReady)' '无文档时阻止生成'
+Assert-NotContains $content 'var selectionMode = app.activeDocument.selection.length > 0;' '对话框前直接访问活动文档'
+Assert-Contains $content 'var colorRecord = buildHotStampColorRecord(0);' 'CMYK 与专色统一文字框'
+Assert-Contains $content 'applyStyledColors(textRef, colorRecord);' '统一文字框分色着色'
+Assert-Contains $content 'var spotColorNameLibrary = [' '已确认专色名称库'
+Assert-Contains $content 'getSpotColorLabel(spotColorInfo[h].name, level >= 2)' '专色常规名/最小短码切换'
+Assert-Contains $content 'isIgnoredSpotColorName(swatchSpot.name)' '剔除 AutoCAD Color 4'
+Assert-Contains $content 'PANTONE 1205 C' 'PANTONE 1205 C 规则'
+Assert-Contains $content '"纳米", compact: "SN"' '纳米短码规则'
+Assert-Contains $content '"消光", compact: "SM"' '消光短码规则'
+Assert-Contains $content '"白墨", compact: "W"' '白墨最小短码规则'
+Assert-NotContains $content 'level === 0 ? ("(" + spotColorInfo[h].name + ")")' '专色名称括号格式分叉'
+Assert-NotContains $content 'spotNametextRef' '专色独立文字框'
+Assert-NotContains $content 'documentSpotColorInfoEnabled' '旧的自动专色识别开关'
+Assert-NotContains $content 'function isDocumentMonochrome()' '旧的自动单色/专色扫描'
 Assert-Contains $content 'restoreDocumentContext(doc, originalActiveLayer, originalActiveArtboardIndex);' '文档上下文恢复'
 Assert-Contains $content 'function loadStoredParams(file)' '设置读取容错'
 Assert-Contains $content 'function parseFiniteInput(text)' '数值输入校验'
@@ -192,7 +226,11 @@ function probeHotStampEdgesAndInfoDirection() {
   function getHotStampRightInfoZones() {
     return { low: { id: 'right-bottom' }, high: { id: 'right-top' } };
   }
-  eval(functionText('getHotStampInfoLayout'));
+  let Comment_text = { text: '' };
+  eval([
+    functionText('getHotStampInfoLayout'),
+    functionText('getHotStampColorLayout')
+  ].join('\n'));
 
   pw = 200; ph = 100;
   let layout = getHotStampInfoLayout();
@@ -207,11 +245,22 @@ function probeHotStampEdgesAndInfoDirection() {
   pw = 100; ph = 200;
   layout = getHotStampInfoLayout();
   if (layout.rotation !== 270
-      || layout.comment.zone.id !== 'left-top'
-      || layout.secondary.zone.id !== 'right-top'
-      || layout.color.zone.id !== 'left-bottom'
-      || layout.main.zone.id !== 'right-bottom') {
-    throw new Error('portrait information did not rotate into four vertical corner zones');
+      || layout.comment.zone.id !== 'right-top'
+      || layout.secondary.zone.id !== 'right-bottom'
+      || layout.color.zone.id !== 'left-top'
+      || layout.main.zone.id !== 'left-bottom') {
+    throw new Error('portrait information did not rotate clockwise into the expected four corner zones');
+  }
+
+  let colorLayout = getHotStampColorLayout(layout);
+  if (colorLayout.zone.id !== 'left-top' || colorLayout.vAlign !== 'top') {
+    throw new Error('portrait hot-stamp color information did not use the rotated top-left position');
+  }
+
+  Comment_text.text = '备注';
+  colorLayout = getHotStampColorLayout(layout);
+  if (layout.comment.zone.id !== 'right-top' || colorLayout.zone.id !== 'left-top') {
+    throw new Error('portrait comment and color information still overlap after rotation mapping');
   }
 }
 
@@ -237,12 +286,96 @@ function probeFilenameCompaction() {
   }
 }
 
+function probeSpotColorNameLibrary() {
+  const libraryStart = source.indexOf('var spotColorNameLibrary =');
+  const libraryEnd = source.indexOf('];', libraryStart);
+  if (libraryStart < 0 || libraryEnd < 0) throw new Error('spot color library declaration is missing');
+  eval(source.slice(libraryStart, libraryEnd + 2));
+  eval([
+    functionText('normalizeSpotColorLookupName'),
+    functionText('findSpotColorNameEntry'),
+    functionText('getSpotColorLabel'),
+    functionText('isIgnoredSpotColorName')
+  ].join('\n'));
+
+  const expected = [
+    ['White', '白墨', 'W'],
+    ['White2', '白墨2', 'W2'],
+    ['nixiang', '纳米', 'SN'],
+    ['逆向', '纳米', 'SN'],
+    ['Gold Foil', '烫金', 'GF'],
+    ['冷烫银', '烫银', 'SF'],
+    ['Matte', '消光', 'SM'],
+    ['Spot Red', '专红', 'SR'],
+    ['Spot Yellow', '专黄', 'SY'],
+    ['Orange', '橙色', 'SO'],
+    ['Green', '绿色', 'SG'],
+    ['Violet', '紫色', 'SV'],
+    ['PANTONE 1205 C', '1205c', '1205c']
+  ];
+  for (const [name, display, compact] of expected) {
+    if (getSpotColorLabel(name, false) !== display || getSpotColorLabel(name, true) !== compact) {
+      throw new Error('spot color label mapping failed for ' + name);
+    }
+  }
+  if (getSpotColorLabel('逆向UV', false) !== '逆向UV') {
+    throw new Error('逆向UV was incorrectly merged into the 纳米 alias');
+  }
+  if (getSpotColorLabel('PANTONE 186 C', false) !== 'PANTONE 186 C'
+      || getSpotColorLabel('自定义专色', false) !== '自定义专色') {
+    throw new Error('unknown spot color name was unexpectedly rewritten');
+  }
+  if (!isIgnoredSpotColorName('AutoCAD Color 4') || !isIgnoredSpotColorName(' autocad color 4 ')) {
+    throw new Error('AutoCAD Color 4 was not ignored case-insensitively');
+  }
+}
+
+function probeManualSpotSelection() {
+  const ColorModel = { SPOT: 'SPOT', REGISTRATION: 'REGISTRATION' };
+  const goldSpot = { name: '烫金', colorType: ColorModel.SPOT, spotKind: 'CMYK', typename: 'Spot', color: {} };
+  const silverSpot = { name: '冷烫银', colorType: ColorModel.SPOT, spotKind: 'LAB', typename: 'Spot', color: {} };
+  const autoSpot = { name: 'AutoCAD Color 4', colorType: ColorModel.SPOT, spotKind: 'CMYK', typename: 'Spot', color: {} };
+  const registrationSpot = { name: '套版色', colorType: ColorModel.REGISTRATION, spotKind: 'CMYK', typename: 'Spot', color: {} };
+  const documentRef = {
+    swatches: [
+      { name: '烫金', color: { typename: 'SpotColor', spot: goldSpot } },
+      { name: 'AutoCAD Color 4', color: { typename: 'SpotColor', spot: autoSpot } },
+      { name: '套版色', color: { typename: 'SpotColor', spot: registrationSpot } }
+    ],
+    spots: [
+      goldSpot,
+      registrationSpot,
+      silverSpot,
+      autoSpot
+    ]
+  };
+  eval([
+    functionText('getSelectableSpotColors'),
+    functionText('containsSpotName'),
+    functionText('normalizeSpotColorLookupName'),
+    functionText('isIgnoredSpotColorName'),
+    functionText('getSpotColorInfo'),
+    functionText('getSelectedSpotColorInfo')
+  ].join('\n'));
+
+  const available = getSelectableSpotColors(documentRef);
+  if (available.map(spot => spot.name).join('|') !== '烫金|冷烫银') {
+    throw new Error('manual spot list did not keep only real spot colors');
+  }
+  const selected = getSelectedSpotColorInfo(documentRef, ['冷烫银']);
+  if (selected.length !== 1 || selected[0].name !== '冷烫银') {
+    throw new Error('manual spot selection was not passed to mark output');
+  }
+}
+
 probeOuterZones();
 probeHotStampEdgesAndInfoDirection();
 probeFilenameCompaction();
+probeSpotColorNameLibrary();
+probeManualSpotSelection();
 if (!probePlacement(0.02)) throw new Error('small multi-artboard rounding error was rejected');
 if (probePlacement(0.20)) throw new Error('real overflow was incorrectly accepted');
-console.log('Node syntax, layout, filename compaction, four-edge marks, and direction probes: OK');
+console.log('Node syntax, layout, filename compaction, four-edge marks, direction, spot color library, and manual spot selection probes: OK');
 '@
 
 $nodeProbe | & node - $resolvedPath
