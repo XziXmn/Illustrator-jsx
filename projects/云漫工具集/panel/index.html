@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'">
+<title>YunLi 工具箱</title>
+<link rel="stylesheet" href="style.css?v=28">
+<link rel="stylesheet" href="font/style.css?v=28">
+<script src="js/theme-boot.js"></script>
+</head>
+<body>
+<main id="view-home" class="page" aria-labelledby="home-title">
+  <div class="page-scroll" id="scroller">
+    <header class="page-heading"><h1 id="home-title">工作台</h1></header>
+    <div class="document-context">
+      <p class="connrow"><span id="bridge-status" class="conn" role="status" aria-live="polite">连接中</span><span id="mode-badge" class="badge" hidden>独立预览</span><span id="version" class="version"></span></p>
+      <p class="file" aria-label="当前文档"><span id="doc-name">未打开文档</span></p>
+    </div>
+    <div id="home-groups"></div>
+  </div>
+</main>
+<main id="view-marks" class="page tool-page" aria-labelledby="marks-title" data-layout="marks" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="marks-title">印刷标记</h1></header>
+    <div class="sheet">
+      <p id="marks-status" class="status" role="status" aria-live="polite">正在读取文档…</p>
+      <div id="mark-sections" class="adaptive-sections">
+        <section class="zone mark-pane" id="mk-basic">
+          <h2>标记参数</h2>
+          <div class="grid2 mark-params">
+            <label class="field">大小<span class="input-unit"><input id="mk-size" value="6" inputmode="decimal" aria-label="标记大小"></span></label>
+<label class="field">偏移<span class="input-unit"><input id="mk-offset" value="2" inputmode="decimal" aria-label="偏移"></span></label>
+<label class="field">线宽<span class="input-unit"><input id="mk-stroke" value="0.07" inputmode="decimal" aria-label="线宽"></span></label>
+            <label class="field">位置<select id="mk-side" aria-label="位置"><option value="out">外侧</option><option value="in">内侧</option></select></label>
+          </div>
+          <div class="rule"></div>
+          <div class="stack grid2">
+            <label class="check"><input id="mk-corner" type="checkbox" checked>印刷角线</label>
+            <label class="check"><input id="mk-hot" type="checkbox">冷烫标记</label>
+            <label class="check"><input id="mk-cut" type="checkbox" checked>马克点</label>
+            <label class="check"><input id="mk-bisect" type="checkbox">等分线</label>
+            <label class="check"><input id="mk-align" type="checkbox">对位线</label>
+          </div>
+          <div id="mk-bisect-box" class="subsection">
+            <h2>等分线</h2>
+            <div class="grid2 mark-params"><label class="field">水平<span class="input-unit"><input id="mk-hcount" value="2" inputmode="numeric" aria-label="水平数"></span></label>
+<label class="field">间距<span class="input-unit"><input id="mk-hspace" value="6" inputmode="decimal" aria-label="水平间距"></span></label>
+<label class="field">垂直<span class="input-unit"><input id="mk-vcount" value="4" inputmode="numeric" aria-label="垂直数"></span></label>
+<label class="field">间距<span class="input-unit"><input id="mk-vspace" value="6" inputmode="decimal" aria-label="垂直间距"></span></label></div>
+          </div>
+        </section>
+        <section class="zone mark-pane" id="mk-additional">
+          <h2>附加选项</h2>
+          <div class="stack grid2">
+            <label class="check"><input id="mk-adapt" type="checkbox" checked>自适应画板</label>
+            <label class="check"><input id="mk-white" type="checkbox" disabled>白墨图层</label>
+            <label class="check"><input id="mk-sep" type="checkbox" checked>印刷分色</label>
+            <label class="check"><input id="mk-info" type="checkbox" checked>文档信息</label>
+          </div>
+          <div id="mk-note-box" class="subsection"><label class="field note-field">文档备注<input id="mk-comment" aria-label="文档备注" placeholder="输入备注"></label></div>
+          <div id="mk-spot-box" class="subsection"><h2>印刷专色</h2><div id="mk-spots" class="stack grid2"><span class="hint">当前文档没有专色。</span></div></div>
+        </section>
+      </div>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">单位：毫米</p><button id="marks-run" class="primary" type="button" disabled>生成标记</button></div></div>
+</main>
+<main id="view-export" class="page tool-page" aria-labelledby="export-title" data-layout="export" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="export-title">工艺导出</h1></header>
+    <div class="sheet export-sheet">
+      <div class="export-context"><p id="export-status" class="status" role="status" aria-live="polite">正在读取文档…</p><button id="ex-refresh" class="icon-button" type="button" aria-label="刷新画板与缩略图" title="刷新画板与缩略图"></button></div>
+      <div class="export-destination">
+        <input id="ex-folder" aria-label="导出路径" placeholder="导出文件夹">
+        <button id="ex-browse" class="secondary" type="button">浏览</button>
+        <label class="check" title="同时生成导出日志"><input id="ex-log" type="checkbox">日志</label>
+      </div>
+      <div id="export-channels"></div>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">TIFF 批量输出</p><button id="export-run" class="primary" type="button" disabled>导出 TIFF</button></div></div>
+</main>
+<main id="view-fonts" class="page font-page" hidden><div class="page-scroll"><p class="status">请先构建项目以加载字体工具。</p></div></main>
+<dialog id="artboard-preview" class="artboard-preview" aria-labelledby="preview-title">
+  <header class="preview-head"><strong id="preview-title">画板预览</strong><button id="preview-close" type="button" class="icon-button" aria-label="关闭画板预览"></button></header>
+  <p id="preview-status" class="hint" role="status">正在读取预览…</p>
+  <div id="preview-stage" class="preview-stage"><img id="preview-image" alt="画板内容" hidden></div>
+  <div class="preview-foot"><span class="hint">画板内容预览</span><button id="preview-scale" class="secondary" type="button" disabled>原尺寸</button></div>
+</dialog>
+<!-- 两个通道共用模板与控件尺寸，窄窗口上下排列，宽窗口并排。 -->
+<template id="export-channel">
+  <section class="zone export-channel">
+    <header class="channel-head"><h2></h2></header>
+    <div class="channel-settings">
+      <div class="paramline">
+        <label class="field">抗锯齿<select data-id="aa"><option>无</option><option>优化图稿</option><option selected>优化文字</option></select></label>
+        <label class="field">PPI<select data-id="ppi"><option>72</option><option>150</option><option>300</option><option selected>360</option><option>600</option></select></label>
+      </div>
+    </div>
+    <div data-id="boards" class="board-list"><p class="empty-state">连接文档后显示画板。</p></div>
+  </section>
+</template>
+<script src="js/bridge.js?v=28"></script>
+<script src="js/tool-bridge.js?v=28"></script>
+<script src="js/nav.js?v=28"></script>
+<script src="js/font-loader.js?v=28"></script>
+<script src="js/home.js?v=28"></script>
+<script src="js/export-preview.js?v=28"></script>
+<script src="js/tools.js?v=28"></script>
+</body>
+</html>

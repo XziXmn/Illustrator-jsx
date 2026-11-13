@@ -1,0 +1,10 @@
+// 云漫工具集 .aip 资源
+// plugin.pipl 由官方 tools/pipl/create_pipl.py 生成(见 build.ps1)
+
+// PIPL: 资源类型 "pipl" / 名称 "plugin"(同 SDK EmptyPanel 示例;
+// Windows 资源名/类型匹配不区分大小写,等价于字醒的 PIPL/PLUGIN)
+plugin pipl "plugin.pipl"
+
+#ifdef YUNMAN_EMBED_PAYLOAD
+101 10 "payload.bin"    // 发布: 嵌入 YunLiCore.exe (类型10/名称101, 同字醒)
+#endif

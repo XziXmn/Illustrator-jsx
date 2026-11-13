@@ -3,10 +3,13 @@ Code for Import https://scriptui.joonas.me 请(Triple click to select):
 {"activeId":70,"items":{"item-0":{"id":0,"type":"Dialog","parentId":false,"style":{"text":"快速导出tiff","preferredSize":[0,0],"margins":10,"orientation":"column","spacing":10,"alignChildren":["left","top"],"varName":"","windowType":"Dialog","creationProps":{"su1PanelCoordinates":false,"maximizeButton":false,"minimizeButton":false,"independent":false,"closeButton":true,"borderless":false,"resizeable":false},"enabled":true}},"item-1":{"id":1,"type":"Panel","parentId":20,"style":{"text":"CMYK","preferredSize":[0,0],"margins":10,"orientation":"column","spacing":20,"alignChildren":["left","top"],"alignment":null,"varName":"cmykCustom","creationProps":{"borderStyle":"etched","su1PanelCoordinates":false},"enabled":true}},"item-20":{"id":20,"type":"Group","parentId":0,"style":{"preferredSize":[0,0],"margins":10,"orientation":"row","spacing":20,"alignChildren":["center","fill"],"alignment":null,"varName":null,"enabled":true}},"item-21":{"id":21,"type":"Panel","parentId":20,"style":{"text":"灰度","preferredSize":[0,0],"margins":10,"orientation":"column","spacing":20,"alignChildren":["left","top"],"alignment":null,"varName":"grayCustom","creationProps":{"borderStyle":"etched","su1PanelCoordinates":false},"enabled":true}},"item-22":{"id":22,"type":"StaticText","parentId":21,"style":{"text":"画板列表","justify":"left","preferredSize":[0,0],"alignment":null,"varName":"grayStaticText","helpTip":null,"softWrap":false,"creationProps":{"truncate":"none","multiline":false,"scrolling":false},"enabled":true}},"item-36":{"id":36,"type":"Group","parentId":0,"style":{"preferredSize":[0,0],"margins":0,"orientation":"row","spacing":10,"alignChildren":["left","top"],"alignment":"center","varName":null,"enabled":true}},"item-37":{"id":37,"type":"Button","parentId":36,"style":{"text":"确定","justify":"center","preferredSize":[0,0],"alignment":null,"varName":"ok","helpTip":null,"enabled":true}},"item-38":{"id":38,"type":"Button","parentId":36,"style":{"text":"取消","justify":"center","preferredSize":[0,0],"alignment":null,"varName":"cancel","helpTip":null,"enabled":true}},"item-39":{"id":39,"type":"Checkbox","parentId":20,"style":{"checked":false,"text":"生成日志","enabled":true,"varName":"logCheckbox"}},"item-40":{"id":40,"type":"Checkbox","parentId":21,"style":{"checked":false,"text":"全选","enabled":true,"varName":"graySelectAllCheck"}}}}
 */
 
-if (app.documents.length == 0) {
-    alert("请先建立一个新文件", "错误");
-    app.documents.add();
-}
+	if (app.documents.length == 0) {
+	    if ($.global.YUNLI_EXPORT) {
+	        throw new Error("请先打开文档。");
+	    }
+	    alert("请先建立一个新文件", "错误");
+	    app.documents.add();
+	}
 
 // DIALOG
 // ======
@@ -267,7 +270,9 @@ function saveSettings(enableLog) {
 
 function initLog() {
     if (logCheckbox.value) {
-        logFile = new File(scriptFolder.fsName + "\\export_log.txt");
+        // YunLi 面板路径下脚本位于安装目录(Program Files),写日志会因 UAC 静默失败,改写文档目录
+        var logDir = $.global.YUNLI_EXPORT ? Folder.myDocuments.fsName + "\\YM_AI_Scripts" : scriptFolder.fsName;
+        logFile = new File(logDir + "\\export_log.txt");
         logStream = logFile.open("a");
         if (logStream) {
             logFile.writeln("=== 导出开始: " + new Date().toLocaleString() + " ===");
@@ -281,7 +286,7 @@ log("文档: " + doc.name);
 log("画板数量: " + doc.artboards.length);
 log("日志启用: " + (logCheckbox.value ? "是" : "否"));
 
-initLog();
+	if (!$.global.YUNLI_EXPORT) initLog();
 
 
 
@@ -534,9 +539,68 @@ function getAntiAliasing(value) {
     }
 }
 
-var previewItems = preloadThumbnailsSync();
-buildArtboardOptions(previewItems);
-myReturn = dialog.show();
+	function selectDropdownText(dropdown, text) {
+	    var wanted = String(text);
+	    var i;
+	    for (i = 0; i < dropdown.items.length; i++) {
+	        if (dropdown.items[i].text === wanted) {
+	            dropdown.selection = i;
+	            return;
+	        }
+	    }
+	}
+	function fillArtboardSet(set, map, boards) {
+	    var i;
+	    for (i = 0; i < boards.length; i++) {
+	        if (!boards[i] || !boards[i].name) continue;
+	        set[boards[i].name] = true;
+	        map[boards[i].name] = boards[i].process || "无";
+	    }
+	}
+	function countOwnKeys(obj) {
+	    var count = 0;
+	    var key;
+	    for (key in obj) {
+	        if (obj.hasOwnProperty(key)) count++;
+	    }
+	    return count;
+	}
+	// YunLi 面板传入参数时跳过缩略图和这个对话框，导出仍走下面原来的分组逻辑。
+	function applyYunLiExport(raw) {
+	    var p = raw || {};
+	    var cmyk = p.cmyk || {};
+	    var gray = p.gray || {};
+	    if (!p.folder) throw new Error("未选择导出文件夹！");
+	    ljInput.text = String(p.folder);
+	    logCheckbox.value = !!p.log;
+	    cmykCompression.value = cmyk.lzw !== false;
+	    grayCompression.value = gray.lzw !== false;
+	    selectDropdownText(cmykPpi, cmyk.ppi || "360");
+	    selectDropdownText(grayPpi, gray.ppi || "360");
+	    selectDropdownText(cmykAntiAliasing, cmyk.antialias || "无");
+	    selectDropdownText(grayAntiAliasing, gray.antialias || "无");
+	    cmykArtboardSet = {};
+	    grayArtboardSet = {};
+	    cmykProcessMap = {};
+	    grayProcessMap = {};
+	    fillArtboardSet(cmykArtboardSet, cmykProcessMap, cmyk.boards || []);
+	    fillArtboardSet(grayArtboardSet, grayProcessMap, gray.boards || []);
+	    if (countOwnKeys(cmykArtboardSet) + countOwnKeys(grayArtboardSet) === 0) {
+	        throw new Error("未选择画板！");
+	    }
+	    initLog();
+	}
+	var previewItems = [];
+	if ($.global.YUNLI_EXPORT) {
+	    var yunliExportPayload = $.global.YUNLI_EXPORT;
+	    $.global.YUNLI_EXPORT = null;
+	    applyYunLiExport(yunliExportPayload);
+	    myReturn = true;
+	} else {
+	    previewItems = preloadThumbnailsSync();
+	    buildArtboardOptions(previewItems);
+	    myReturn = dialog.show();
+	}
 
 if (myReturn == true) {
 

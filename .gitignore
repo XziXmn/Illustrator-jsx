@@ -1,2 +1,9 @@
 node_modules/
 release/
+references/字醒/original/
+references/字醒/web/ocr/
+projects/云漫工具集/dist/
+projects/云漫工具集/tools/uitest/web/
+projects/云漫工具集/tools/uitest/shots/
+projects/云漫工具集/core/libs/ocr/
+projects/云漫工具集/core/ocr/server/

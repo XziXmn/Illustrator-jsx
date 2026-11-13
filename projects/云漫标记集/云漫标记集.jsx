@@ -554,8 +554,11 @@ var spotColorNameLibrary = [
     { aliases: ["紫色", "Violet"], display: "紫色", compact: "SV" }
 ];
 
-if (app.documents.length == 0) {
-    alert("请先建立一个新文件", "错误");
+	if (app.documents.length == 0) {
+	    if ($.global.YUNLI_MARKS) {
+	        throw new Error("请先打开文档。");
+	    }
+	    alert("请先建立一个新文件", "错误");
     try {
         doc = app.documents.add();
     } catch (e) {
@@ -1071,8 +1074,98 @@ ok.onClick = function() {
     dialog.close(true);
 }
 
-dialog.center();
-var myReturn = dialog.show();
+	// YunLi 面板传入参数时不弹出这个对话框，控件值仍走原来的生成逻辑。
+	function applyYunLiMarks(raw) {
+	    var p = raw || {};
+	    function num(v, fallback) {
+	        var n = parseFiniteInput(v === undefined || v === null ? "" : String(v));
+	        return n === null ? fallback : n;
+	    }
+	    function flag(v, fallback) {
+	        if (v === undefined || v === null) return fallback;
+	        return v === true || v === "true";
+	    }
+	    markRadiusMMInput.text = String(num(p.size, 6));
+	    offsetMMInput.text = String(num(p.offset, 2));
+	    lineWidthInput.text = String(num(p.stroke, 0.07));
+	    var inside = flag(p.inside, false);
+	    positionDropdown.selection = inside ? 1 : 0;
+	    direction.value = inside;
+	    var markAreaMM = parseFiniteInput(markRadiusMMInput.text);
+	    var offsetMM = parseFiniteInput(offsetMMInput.text);
+	    var lineWidthMM = parseFiniteInput(lineWidthInput.text);
+	    var horizontalCount = num(p.hCount, 2);
+	    var verticalCount = num(p.vCount, 4);
+	    var horizontalSpaceMM = num(p.hSpace, 6);
+	    var verticalSpaceMM = num(p.vSpace, 6);
+	    horizontalDirection.text = String(horizontalCount);
+	    verticalDirection.text = String(verticalCount);
+	    spacing_1.text = String(horizontalSpaceMM);
+	    spacing_2.text = String(verticalSpaceMM);
+	    if (markAreaMM === null || offsetMM === null || markAreaMM < 4 || offsetMM < 0) {
+	        throw new Error("输入的标记大小必须大于等于4mm且偏移大于等于0mm！");
+	    }
+	    if (lineWidthMM === null || lineWidthMM <= 0) {
+	        throw new Error("线宽必须是大于0的数字！");
+	    }
+	    if (horizontalCount < 1 || verticalCount < 1
+	        || Math.floor(horizontalCount) !== horizontalCount
+	        || Math.floor(verticalCount) !== verticalCount) {
+	        throw new Error("等分线的水平数和垂直数必须是大于等于1的整数！");
+	    }
+	    if (horizontalSpaceMM < 0 || verticalSpaceMM < 0) {
+	        throw new Error("等分线间距必须是大于等于0的数字！");
+	    }
+	    PrintingCornerLine.value = flag(p.cornerLine, true);
+	    hotStampingMark.value = flag(p.hotStamp, false);
+	    cuttingMark.value = flag(p.cutMark, true);
+	    Bisector.value = flag(p.bisector, false);
+	    Grating.value = flag(p.grating, false);
+	    AdaptiveArtboard.value = flag(p.adaptArtboard, true);
+	    whiteInkLayer.value = flag(p.whiteInk, false);
+	    PrintingColorSeparation.value = flag(p.separation, true);
+	    FileInformation.value = flag(p.fileInfo, true);
+	    Comment_text.text = p.comment ? String(p.comment) : "";
+	    if (selectionMode) {
+	        AdaptiveArtboard.value = false;
+	        hotStampingMark.value = false;
+	        whiteInkLayer.value = false;
+	    }
+	    if (direction.value) {
+	        AdaptiveArtboard.value = false;
+	        PrintingCornerLine.value = false;
+	    }
+	    if (!hotStampingMark.value) whiteInkLayer.value = false;
+	    var wanted = p.spots || [];
+	    var i, j, on;
+	    for (i = 0; i < spotColorSelectorItems.length; i++) {
+	        on = false;
+	        for (j = 0; j < wanted.length; j++) {
+	            if (wanted[j] === spotColorSelectorItems[i].name) on = true;
+	        }
+	        spotColorSelectorItems[i].control.value = on;
+	    }
+	    collectSelectedSpotColorNames();
+	    validatedInputs = {
+	        markAreaMM: markAreaMM,
+	        offsetMM: offsetMM,
+	        lineWidthMM: lineWidthMM,
+	        horizontalCount: horizontalCount,
+	        verticalCount: verticalCount,
+	        horizontalSpaceMM: horizontalSpaceMM,
+	        verticalSpaceMM: verticalSpaceMM
+	    };
+	    return true;
+	}
+	var myReturn = false;
+	if ($.global.YUNLI_MARKS) {
+	    var yunliMarksPayload = $.global.YUNLI_MARKS;
+	    $.global.YUNLI_MARKS = null;
+	    myReturn = applyYunLiMarks(yunliMarksPayload);
+	} else {
+	    dialog.center();
+	    myReturn = dialog.show();
+	}
 var activeDocumentForRun = null;
 var originalActiveLayer = null;
 var originalActiveArtboardIndex = -1;
