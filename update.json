@@ -1,8 +1,8 @@
 {
-    "version":  "0.3.1",
-    "tag":  "yunli-v0.3.1",
+    "version":  "0.3.2",
+    "tag":  "yunli-v0.3.2",
     "asset":  "YunLiTools.aip",
-    "sha256":  "6089a32a6fd34dccd476e2cd1f8b1f5ff7cf4ed01a2aceece301efe842d9d2c1",
-    "notes":  "修复首次启动解压失败（tools/gs/Resource 目录条目）；解压结果按版本缓存，之后启动不再解压。0.3.0 会在启动时报错，请手动覆盖安装本次更新。",
+    "sha256":  "11754d1fe0ef5c81d92aafc4cb7ecd41284f278084cabe50dadacc933847106e",
+    "notes":  "移除左侧工具目录，工具入口集中在首页；版本与「检查更新」移到首页连接行；字体页去掉模块来源说明。",
     "published":  "2026-11-20"
 }

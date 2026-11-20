@@ -32,7 +32,7 @@ namespace YunLi.Core
 {
     internal static class Program
     {
-        public const string Version = "0.3.1";
+        public const string Version = "0.3.2";
 
         internal static string AipPath;
         internal static string HostPath;
