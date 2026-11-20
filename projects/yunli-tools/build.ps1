@@ -1,4 +1,4 @@
-﻿# 云漫工具集 构建脚本(阶段1)
+﻿# YunLi工具箱 构建脚本(阶段1)
 # 用法:
 #   powershell -ExecutionPolicy Bypass -File build.ps1                 # 开发布局: dist\{YunLiTools.aip, payload\}
 #   powershell -ExecutionPolicy Bypass -File build.ps1 -Pack           # 发布布局: 单文件 dist\YunLiTools.aip

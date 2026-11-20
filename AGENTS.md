@@ -1,12 +1,12 @@
 # Illustrator JSX 仓库规则
 
-本仓库同时维护独立 JSX 脚本和 YunLi 插件。以下界面规范适用于 `projects/云漫工具集/`，不要将插件面板的布局规则套到其他脚本项目。
+本仓库同时维护独立 JSX 脚本和 YunLi 插件。以下界面规范适用于 `projects/yunli-tools/`，不要将插件面板的布局规则套到其他脚本项目。
 
 ## 修改入口
 
 - 先读相关项目文档与实际调用链，确认当前未提交改动；现有改动不作为可覆盖的空白底稿。
-- YunLi 的详细设计规范见 [DESIGN.md](projects/云漫工具集/DESIGN.md)，修改界面前必须阅读。
-- `projects/云漫工具集/panel/` 是面板源码；`host/` 是 ExtendScript 调度；`core/src/` 是 .NET 核心；`shell/src/` 是 Illustrator 面板壳。
+- YunLi 的详细设计规范见 [DESIGN.md](projects/yunli-tools/DESIGN.md)，修改界面前必须阅读。
+- `projects/yunli-tools/panel/` 是面板源码；`host/` 是 ExtendScript 调度；`core/src/` 是 .NET 核心；`shell/src/` 是 Illustrator 面板壳。
 - `dist/`、`release/` 是产物目录，不作为源码修改入口。`references/` 是参考资料，不能直接把参考插件的品牌、授权界面和整套页面带入 YunLi。
 - 标记功能对照 `projects/云漫标记集/云漫标记集.jsx`；导出功能对照 `projects/快速导出工艺tif/快速导出工艺tiff.jsx`。改面板前先核对原脚本的完整交互，不得默默丢掉缩略图、预览、参数或状态保留。
 
@@ -79,7 +79,7 @@
 - 重排后验证勾选、数值、路径与工艺选择不丢失；核对导航高亮、搜索、图片查看和关闭后的状态。
 - 页面源码修改后，通过项目构建同步产物；不要只修浏览器临时样式或手工修改 `dist`。
 
-在 `projects/云漫工具集/` 下按需执行：
+在 `projects/yunli-tools/` 下按需执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1

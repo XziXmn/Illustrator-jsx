@@ -2,20 +2,20 @@ node_modules/
 release/
 references/字醒/original/
 references/字醒/web/ocr/
-projects/云漫工具集/dist/
-projects/云漫工具集/tools/uitest/web/
-projects/云漫工具集/tools/uitest/shots/
-projects/云漫工具集/core/libs/ocr/
-projects/云漫工具集/core/ocr/server/
+projects/yunli-tools/dist/
+projects/yunli-tools/tools/uitest/web/
+projects/yunli-tools/tools/uitest/shots/
+projects/yunli-tools/core/libs/
+projects/yunli-tools/core/ocr/server/
 
 # 构建产物
-projects/云漫工具集/shell/rc/*.o
-projects/云漫工具集/shell/rc/plugin.pipl
-projects/云漫工具集/shell/rc/payload.bin
-projects/云漫工具集/tools/uitest/__pycache__/
+projects/yunli-tools/shell/rc/*.o
+projects/yunli-tools/shell/rc/plugin.pipl
+projects/yunli-tools/shell/rc/payload.bin
+projects/yunli-tools/tools/uitest/__pycache__/
 
 # 第三方运行时：由 tools/fetch-deps.ps1 下载到本地
-projects/云漫工具集/core/tools/
+projects/yunli-tools/core/tools/
 
 # 仅供参考、体积大，不入库
 references/

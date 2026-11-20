@@ -9,7 +9,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$project = Join-Path $root "projects\云漫工具集"
+$project = Join-Path $root "projects\yunli-tools"
 $asset = Join-Path $project "dist\YunLiTools.aip"
 
 # 版本号唯一来源:Program.cs 的 Version 常量
