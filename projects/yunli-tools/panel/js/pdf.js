@@ -22,7 +22,7 @@
   });
 
   $("pdf-run").addEventListener("click", function () {
-    if (!file) { setStatus("请先选择 PDF。", "err"); return; }
+    if (!file) { setStatus("请先选择 PDF 或 AI。", "err"); return; }
     var button = this;
     button.disabled = true;
     setStatus("正在转曲…", "");

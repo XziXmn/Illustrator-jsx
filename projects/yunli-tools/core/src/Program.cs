@@ -691,8 +691,8 @@ namespace YunLi.Core
                         {
                             using (OpenFileDialog dlg = new OpenFileDialog())
                             {
-                                dlg.Title = "选择要转曲的 PDF";
-                                dlg.Filter = "PDF 文件|*.pdf";
+                                dlg.Title = "选择要转曲的 PDF / AI";
+                                dlg.Filter = "PDF 与 Illustrator|*.pdf;*.ai|所有文件|*.*";
                                 dlg.Multiselect = !object.Equals(toolInner.ContainsKey("single") ? toolInner["single"] : null, true);
                                 if (dlg.ShowDialog(this) == DialogResult.OK && dlg.FileNames != null)
                                     picked = dlg.FileNames;

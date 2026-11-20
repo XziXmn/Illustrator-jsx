@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,8 +19,15 @@ namespace ZiXing
         public static Dictionary<string, object> Convert(string input, string folder, string assets)
         {
             if (string.IsNullOrEmpty(input) || !File.Exists(input))
-                throw new Exception("找不到 PDF。");
+                throw new Exception("找不到文件。");
             input = Path.GetFullPath(input);
+            string extension = Path.GetExtension(input).ToLowerInvariant();
+            if (extension != ".pdf" && extension != ".ai")
+                throw new Exception("只支持 PDF 和 PDF 兼容的 .ai 文件。");
+            if (!HasPdfHeader(input))
+                throw new Exception(extension == ".ai"
+                    ? "这个 .ai 不是 PDF 兼容格式（文件里没有 PDF 层），无法按预览转曲。请在 Illustrator 里另存时勾选「创建 PDF 兼容文件」后再试。"
+                    : "这个文件不是有效的 PDF。");
             folder = string.IsNullOrEmpty(folder)
                 ? Path.GetDirectoryName(input)
                 : Path.GetFullPath(folder);
@@ -29,7 +36,8 @@ namespace ZiXing
             if (qpdf == null)
                 throw new Exception("未找到 qpdf。请重新构建工具，让 assets\\tools\\qpdf 与核心放在一起。");
 
-            string output = UniqueOutput(folder, Path.GetFileNameWithoutExtension(input) + "-转曲.pdf");
+            string output = UniqueOutput(folder,
+                Path.GetFileNameWithoutExtension(input) + "-转曲" + (extension == ".ai" ? ".ai" : ".pdf"));
             string work = Path.Combine(Path.GetTempPath(), "yunli-pdf-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(work);
             try
@@ -73,6 +81,8 @@ namespace ZiXing
                         : outlined
                             ? "已按嵌入字形转成曲线。"
                             : "没有私有数据，也没有活字，已原样复制。";
+                if (extension == ".ai")
+                    note += " AI 文件按 PDF 兼容层处理。";
                 return new Dictionary<string, object> {
                     { "ok", true },
                     { "input", input },
@@ -122,6 +132,24 @@ namespace ZiXing
             if (HasPrivateData(qpdf, output))
                 throw new Exception("Illustrator 私有数据没有去干净，已停止。");
             return true;
+        }
+
+        // .ai 只有在保存时勾选「创建 PDF 兼容文件」才带 PDF 层,否则 qpdf 无从处理。
+        static bool HasPdfHeader(string path)
+        {
+            using (FileStream stream = File.OpenRead(path))
+            {
+                byte[] buffer = new byte[1024];
+                int read = stream.Read(buffer, 0, buffer.Length);
+                byte[] marker = Encoding.ASCII.GetBytes("%PDF");
+                for (int i = 0; i + marker.Length <= read; i++)
+                {
+                    int k = 0;
+                    while (k < marker.Length && buffer[i + k] == marker[k]) k++;
+                    if (k == marker.Length) return true;
+                }
+                return false;
+            }
         }
 
         static bool HasPrivateData(string qpdf, string path)

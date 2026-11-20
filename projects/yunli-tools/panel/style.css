@@ -200,8 +200,9 @@ a.tool-entry:hover { background:var(--subtle); }
 
 /* 首页底部:版本与在线更新 */
 #view-home .home-foot { flex:none; display:flex; flex-direction:column; align-items:center; gap:2px; padding:6px var(--page-inset) 10px; }
-#view-home .home-foot-row { display:flex; align-items:center; gap:8px; }
-#view-home .home-foot .link { padding:2px 0; }
+#view-home .home-foot-row { display:flex; align-items:baseline; gap:8px; }
+#view-home .home-foot-row .hint { font-size:var(--text-body); line-height:var(--line-body); }
+#view-home .home-foot .link { padding:0; font-size:var(--text-body); line-height:var(--line-body); }
 #view-home .update-state { margin:0; text-align:center; }
 .update-state.ok { color:var(--ink); }
 .update-state.err { color:var(--danger); }
