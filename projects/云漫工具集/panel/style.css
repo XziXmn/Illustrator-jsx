@@ -170,6 +170,7 @@ a.tool-entry:hover { background:var(--subtle); }
 #mk-spots .check { white-space:normal; overflow-wrap:anywhere; }
 #mk-spots { max-height:96px; overflow:auto; overscroll-behavior:contain; scrollbar-gutter:stable; }
 .export-sheet { width:100%; max-width:840px; margin-inline:auto; }
+#view-pdf .sheet { width:100%; max-width:var(--workspace-max,840px); margin-inline:auto; }
 .export-context { display:flex; align-items:center; gap:6px; }
 .export-context .status { flex:1; min-width:0; }
 .board-preview { display:grid; place-items:center; width:40px; height:40px; padding:0; overflow:hidden; color:var(--muted); background:var(--surface); border:1px solid var(--line); border-radius:8px; }
@@ -190,6 +191,10 @@ a.tool-entry:hover { background:var(--subtle); }
 .export-destination > input { flex:1; }
 .export-destination button,.export-destination .check { flex:none; }
 .export-destination button { padding-inline:10px; }
+.pdf-files { display:flex; flex-direction:column; gap:4px; }
+.pdf-file { display:flex; align-items:center; gap:8px; min-height:28px; }
+.pdf-file span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pdf-file button { flex:none; height:28px; padding-inline:8px; }
 #export-channels { display:grid; grid-template-columns:minmax(0,1fr); gap:8px; align-items:start; }
 .export-channel { display:flex; flex-direction:column; gap:var(--item-gap); min-height:0; }
 .channel-head { display:flex; align-items:center; justify-content:space-between; gap:4px; flex:none; }
@@ -206,3 +211,9 @@ a.tool-entry:hover { background:var(--subtle); }
 @media(max-height:520px) { .board-list { max-height:96px; } }
 @media(max-width:320px) { .tool-page { --number-width:48px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
+
+/* 工具目录底部:版本与在线更新 */
+.directory-foot { display:flex; flex:none; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
+.update-state { margin:4px 0 0; }
+.update-state.ok { color:var(--ink); }
+.update-state.err { color:var(--danger); }

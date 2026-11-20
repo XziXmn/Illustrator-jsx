@@ -10,6 +10,16 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# PDF 转曲的第三方运行时(qpdf / Ghostscript)不入库,缺失时自动拉取。
+if (-not (Test-Path (Join-Path $root "core\tools\qpdf\qpdf.exe")) -or
+    -not (Test-Path (Join-Path $root "core\tools\gs\bin\gswin64c.exe"))) {
+    $fetchDeps = Join-Path $root "tools\fetch-deps.ps1"
+    if (Test-Path $fetchDeps) {
+        Write-Host "正在拉取 PDF 转曲依赖(qpdf / Ghostscript)…"
+        try { & $fetchDeps } catch { Write-Warning ("依赖拉取失败,PDF 转曲不可用: " + $_.Exception.Message) }
+    }
+}
+
 function Copy-YunLiFontAssets([string]$webDir, [string]$assetsDir) {
     $ref = Join-Path $root "..\..\references\字醒"
     $fontDir = Join-Path $webDir "font"
@@ -180,6 +190,8 @@ if (Test-Path (Join-Path $libs "ocr\Microsoft.ML.OnnxRuntime.dll")) {
 $srcs = @("$srcPath", "$enginePath")
 if (Test-Path (Join-Path $root "core\src\OcrEngine.cs")) { $srcs += (Join-Path $root "core\src\OcrEngine.cs") }
 if (Test-Path (Join-Path $root "core\src\AiEngine.cs")) { $srcs += (Join-Path $root "core\src\AiEngine.cs") }
+if (Test-Path (Join-Path $root "core\src\PdfCurve.cs")) { $srcs += (Join-Path $root "core\src\PdfCurve.cs") }
+if (Test-Path (Join-Path $root "core\src\Update.cs")) { $srcs += (Join-Path $root "core\src\Update.cs") }
 $resArgs = @()
 if ($Pack) {
     # 发布: 资产(面板 + WebView2 DLL)打包为清单资源 YunLi.Payload
@@ -194,6 +206,16 @@ if ($Pack) {
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Copy-Item $webDir (Join-Path $stage "web") -Recurse -Force
     Copy-Item (Join-Path $coreOut "assets\host") (Join-Path $stage "host") -Recurse -Force
+    $qpdfSrc = Join-Path $root "core\tools\qpdf"
+    if (Test-Path (Join-Path $qpdfSrc "qpdf.exe")) {
+        $qpdfStage = Join-Path $stage "tools\qpdf"
+        New-Item -ItemType Directory -Force -Path $qpdfStage | Out-Null
+        Copy-Item (Join-Path $qpdfSrc "*") $qpdfStage -Force
+    }
+    $gsSrc = Join-Path $root "core\tools\gs"
+    if (Test-Path (Join-Path $gsSrc "bin\gswin64c.exe")) {
+        Copy-Item $gsSrc (Join-Path $stage "tools\gs") -Recurse -Force
+    }
     Copy-Item (Join-Path $libs "WebView2Loader.dll") $stage -Force
     Copy-Item (Join-Path $libs "Microsoft.Web.WebView2.Core.dll") $stage -Force
     Copy-Item (Join-Path $libs "Microsoft.Web.WebView2.WinForms.dll") $stage -Force
@@ -225,6 +247,18 @@ if (-not $Pack) {
     Copy-Item (Join-Path $root "panel\style.css") $webDir -Force
     Copy-Item (Join-Path $root "panel\js\*") (Join-Path $webDir "js") -Force
     Copy-YunLiFontAssets $webDir (Join-Path $coreOut "assets")
+    $qpdfSrc = Join-Path $root "core\tools\qpdf"
+    if (Test-Path (Join-Path $qpdfSrc "qpdf.exe")) {
+        $qpdfDest = Join-Path $coreOut "assets\tools\qpdf"
+        New-Item -ItemType Directory -Force -Path $qpdfDest | Out-Null
+        Copy-Item (Join-Path $qpdfSrc "*") $qpdfDest -Force
+    }
+    $gsSrc = Join-Path $root "core\tools\gs"
+    if (Test-Path (Join-Path $gsSrc "bin\gswin64c.exe")) {
+        $gsDest = Join-Path $coreOut "assets\tools\gs"
+        if (Test-Path $gsDest) { Remove-Item $gsDest -Recurse -Force }
+        Copy-Item $gsSrc $gsDest -Recurse -Force
+    }
     # 识别档位 1: 运行时 DLL 放 exe 旁,模型放 assets\ocr\server
     if (Test-Path (Join-Path $libs "ocr\onnxruntime.dll")) {
         Copy-Item (Join-Path $libs "ocr\*.dll") $coreOut -Force

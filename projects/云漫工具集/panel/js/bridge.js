@@ -32,7 +32,10 @@
       var data;
       try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.action === "hello") {
-        versionEl.textContent = "v" + data.version;
+        if (versionEl) versionEl.textContent = "v" + data.version;
+        window.YunLiVersion = data.version || "";
+        var labels = document.querySelectorAll("[data-yunli-version]");
+        for (var i = 0; i < labels.length; i++) labels[i].textContent = "v" + data.version;
         if (data.standalone) badgeEl.hidden = false;
         show(true, "已连接");
       }

@@ -7,6 +7,7 @@
     marks:'<path d="M4 8V4h4m8 0h4v4m0 8v4h-4M8 20H4v-4M12 8v8m-4-4h8"/>',
     export:'<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',
     fonts:'<path d="M4 20 10 4h4l6 16M7 13h10"/>',
+    pdf:'<path d="M7 3h7l5 5v13H7Z"/><path d="M14 3v5h5M9 17c1-2 5-2 6 0"/>',
     check:'<path d="M9 12l2 2 4-4M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/>',
     barcode:'<path d="M3 5v14m4-14v14m3-14v14m4-14v14m3-14v14m4-14v14"/>',
     arrow:'<path d="m9 5 7 7-7 7"/>',
@@ -32,7 +33,8 @@
     { id:"prepress", title:"印前制作", items:[
       { id:"marks", title:"印刷标记", desc:"角线、马克点、分色与文档信息", view:"marks" },
       { id:"export", title:"工艺导出", desc:"按画板批量导出四色与工艺 TIFF", view:"export" },
-      { id:"check", title:"印前检查", desc:"上机前检查稿件", disabled:true }
+      { id:"check", title:"印前检查", desc:"上机前检查稿件", disabled:true },
+      { id:"pdf", title:"PDF 转曲", desc:"用预览数据去掉缺字体和缺图片", view:"pdf" }
     ] },
     { id:"design", title:"设计处理", items:[
       { id:"fonts", title:"字体与文字", desc:"转曲恢复、文字提取与合并拆分", view:"fonts" },
@@ -175,7 +177,29 @@
   directory.appendChild(catalog);
   document.body.appendChild(directory);
   mountCatalog(catalog, "搜索工具目录", true);
+
+  // 目录底部:当前版本与在线更新入口(update.js 绑定)。
+  var foot = el("div", "directory-foot");
+  var versionLabel = el("span", "hint", "—");
+  versionLabel.id = "update-version";
+  versionLabel.setAttribute("data-yunli-version", "");
+  var update = el("button", "link", "检查更新");
+  update.type = "button";
+  update.id = "update-check";
+  foot.appendChild(versionLabel);
+  foot.appendChild(update);
+  directory.appendChild(foot);
+  var updateState = el("p", "hint update-state");
+  updateState.id = "update-state";
+  directory.appendChild(updateState);
+
   directory.addEventListener("toggle", function (event) { menu.setAttribute("aria-expanded", String(event.newState === "open")); });
+  // 浏览器自带的 Escape 轻关闭不一定触发 toggle,这里补一次状态同步并确保真的关闭。
+  document.addEventListener("keydown", function (event) {
+    if (event.key !== "Escape") return;
+    if (directory.matches(":popover-open")) directory.hidePopover();
+    menu.setAttribute("aria-expanded", "false");
+  });
   directory.addEventListener("click", function (event) {
     if (event.target.closest("a")) {
       directory.hidePopover();

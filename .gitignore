@@ -7,3 +7,16 @@ projects/云漫工具集/tools/uitest/web/
 projects/云漫工具集/tools/uitest/shots/
 projects/云漫工具集/core/libs/ocr/
 projects/云漫工具集/core/ocr/server/
+
+# 构建产物
+projects/云漫工具集/shell/rc/*.o
+projects/云漫工具集/shell/rc/plugin.pipl
+projects/云漫工具集/shell/rc/payload.bin
+projects/云漫工具集/tools/uitest/__pycache__/
+
+# 第三方运行时：由 tools/fetch-deps.ps1 下载到本地
+projects/云漫工具集/core/tools/
+
+# 仅供参考、体积大，不入库
+references/
+/*.pdf

@@ -1,4 +1,4 @@
-// =========================================================================
+﻿// =========================================================================
 // 云漫工具集核心进程 (YunLiCore.exe)
 //
 // .NET Framework 4.8 WinForms(C#5,系统内置 csc.exe 可编译)。
@@ -32,7 +32,11 @@ namespace YunLi.Core
 {
     internal static class Program
     {
-        public const string Version = "0.2.0";
+        public const string Version = "0.3.0";
+
+        internal static string AipPath;
+        internal static string HostPath;
+        internal static int HostPid;
 
         [STAThread]
         private static int Main(string[] args)
@@ -64,7 +68,11 @@ namespace YunLi.Core
                     hostExe = args[i + 1];
                 if (args[i] == "--aidir")
                     aipDir = args[i + 1];
+                if (args[i] == "--aip")
+                    AipPath = args[i + 1];
             }
+            HostPath = hostExe;
+            HostPid = parentPid;
             bool standalone = Array.IndexOf(args, "--standalone") >= 0;
 
             // 识别引擎自测: YunLiCore.exe --selftest-ocr <png> → 结果写 <png>.ocr.json
@@ -89,6 +97,26 @@ namespace YunLi.Core
                     File.WriteAllText(outPath, "{\"error\":\"" +
                         ex.Message.Replace("\\", "\\\\").Replace("\"", "'") + "\"}", new UTF8Encoding(false));
                     Log("selftest-fail " + ex);
+                }
+                return 0;
+            }
+            int pdfTest = Array.IndexOf(args, "--selftest-pdf");
+            if (pdfTest >= 0 && pdfTest + 2 < args.Length)
+            {
+                string pdf = args[pdfTest + 1];
+                string folder = args[pdfTest + 2];
+                string curvePath = Path.Combine(folder, Path.GetFileName(pdf) + ".curve.json");
+                try
+                {
+                    object result = ZiXing.PdfCurve.Convert(pdf, folder, ResolveAssets());
+                    File.WriteAllText(curvePath, ZiXing.Json.Encode(result), new UTF8Encoding(false));
+                    Log("pdf-selftest-ok " + curvePath);
+                }
+                catch (Exception ex)
+                {
+                    File.WriteAllText(curvePath, "{\"error\":\"" +
+                        ex.Message.Replace("\\", "\\\\").Replace("\"", "'") + "\"}", new UTF8Encoding(false));
+                    Log("pdf-selftest-fail " + ex.Message);
                 }
                 return 0;
             }
@@ -561,6 +589,131 @@ namespace YunLi.Core
                     Dictionary<string, object> toolInner = (payload.TryGetValue("payload", out toolInnerObj) && toolInnerObj is Dictionary<string, object>)
                         ? (Dictionary<string, object>)toolInnerObj
                         : new Dictionary<string, object>();
+                    if (toolAction == "updateCheck")
+                    {
+                        Task.Run(delegate { return (object)ZiXing.Update.Check(Program.Version); })
+                            .ContinueWith(delegate(Task<object> task)
+                            {
+                                if (task.IsFaulted)
+                                {
+                                    string err = task.Exception.GetBaseException().Message;
+                                    Program.Log("update-error " + err);
+                                    Deliver(new Dictionary<string, object> { { "id", id }, { "ok", false }, { "error", err } });
+                                }
+                                else Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                            });
+                        return;
+                    }
+                    if (toolAction == "updateDownload")
+                    {
+                        string version = ZiXing.Json.String(toolInner, "version");
+                        string tag = ZiXing.Json.String(toolInner, "tag");
+                        string asset = ZiXing.Json.String(toolInner, "asset");
+                        string sha256 = ZiXing.Json.String(toolInner, "sha256");
+                        string url = ZiXing.Json.String(toolInner, "url");
+                        string messageId = id;
+                        Task.Run(delegate
+                        {
+                            return (object)ZiXing.Update.Download(version, tag, asset, sha256, url,
+                                delegate(long received, long total)
+                                {
+                                    Deliver(new Dictionary<string, object> {
+                                        { "id", messageId }, { "eventType", "progress" },
+                                        { "data", new Dictionary<string, object> { { "received", received }, { "total", total } } }
+                                    });
+                                });
+                        }).ContinueWith(delegate(Task<object> task)
+                        {
+                            if (task.IsFaulted)
+                            {
+                                string err = task.Exception.GetBaseException().Message;
+                                Program.Log("update-download-error " + err);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", false }, { "error", err } });
+                            }
+                            else
+                            {
+                                Program.Log("update-download-ok");
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                            }
+                        });
+                        return;
+                    }
+                    if (toolAction == "updateInstall")
+                    {
+                        string file = ZiXing.Json.String(toolInner, "file");
+                        Deliver(new Dictionary<string, object> {
+                            { "id", id }, { "ok", true },
+                            { "data", ZiXing.Update.Install(file, Program.AipPath, Program.HostPath, Program.HostPid) }
+                        });
+                        return;
+                    }
+                    if (toolAction == "pickFiles")
+                    {
+                        string[] picked = new string[0];
+                        Action choose = delegate
+                        {
+                            using (OpenFileDialog dlg = new OpenFileDialog())
+                            {
+                                dlg.Title = "选择要转曲的 PDF";
+                                dlg.Filter = "PDF 文件|*.pdf";
+                                dlg.Multiselect = !object.Equals(toolInner.ContainsKey("single") ? toolInner["single"] : null, true);
+                                if (dlg.ShowDialog(this) == DialogResult.OK && dlg.FileNames != null)
+                                    picked = dlg.FileNames;
+                            }
+                        };
+                        if (InvokeRequired) Invoke(choose);
+                        else choose();
+                        Deliver(new Dictionary<string, object> {
+                            { "id", id }, { "ok", true },
+                            { "data", new Dictionary<string, object> { { "files", picked } } }
+                        });
+                        return;
+                    }
+                    if (toolAction == "pdfOutline")
+                    {
+                        object[] files;
+                        try { files = ZiXing.Json.Array(toolInner, "files"); }
+                        catch (Exception) { files = new object[0]; }
+                        string folder = ZiXing.Json.String(toolInner, "folder");
+                        string assetsDir = assets;
+                        Task.Run(delegate
+                        {
+                            List<object> results = new List<object>();
+                            for (int n = 0; n < files.Length; n++)
+                            {
+                                string file = files[n] as string;
+                                Deliver(new Dictionary<string, object> {
+                                    { "id", id }, { "eventType", "progress" },
+                                    { "data", new Dictionary<string, object> { { "file", file }, { "index", n + 1 }, { "count", files.Length } } }
+                                });
+                                try
+                                {
+                                    results.Add(ZiXing.PdfCurve.Convert(file, folder, assetsDir));
+                                }
+                                catch (Exception ex)
+                                {
+                                    results.Add(new Dictionary<string, object> {
+                                        { "ok", false }, { "input", file }, { "error", ex.Message }
+                                    });
+                                }
+                            }
+                            return (object)new Dictionary<string, object> { { "files", results.ToArray() } };
+                        }).ContinueWith(delegate(Task<object> task)
+                        {
+                            if (task.IsFaulted)
+                            {
+                                string err = task.Exception.GetBaseException().Message;
+                                Program.Log("pdf-error " + err);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", false }, { "error", err } });
+                            }
+                            else
+                            {
+                                Program.Log("pdf-ok");
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                            }
+                        });
+                        return;
+                    }
                     if (toolAction == "pickFolder")
                     {
                         string picked = "";

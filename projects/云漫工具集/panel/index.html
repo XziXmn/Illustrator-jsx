@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'">
 <title>YunLi 工具箱</title>
-<link rel="stylesheet" href="style.css?v=28">
-<link rel="stylesheet" href="font/style.css?v=28">
+<link rel="stylesheet" href="style.css?v=29">
+<link rel="stylesheet" href="font/style.css?v=29">
 <script src="js/theme-boot.js"></script>
 </head>
 <body>
@@ -81,6 +81,20 @@
   </div>
   <div class="page-foot"><div class="page-actions"><p class="hint">TIFF 批量输出</p><button id="export-run" class="primary" type="button" disabled>导出 TIFF</button></div></div>
 </main>
+<main id="view-pdf" class="page tool-page" aria-labelledby="pdf-title" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="pdf-title">PDF 转曲</h1></header>
+    <div class="sheet">
+      <p id="pdf-status" class="status" role="status" aria-live="polite">选择 PDF。结果写在原文件旁边。</p>
+      <div class="export-destination">
+        <input id="pdf-file" aria-label="PDF 文件" placeholder="选择 PDF" readonly>
+        <button id="pdf-browse" class="secondary" type="button">浏览</button>
+      </div>
+      <div id="pdf-results" class="pdf-files"></div>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">不经过 Illustrator</p><button id="pdf-run" class="primary" type="button">开始转曲</button></div></div>
+</main>
 <main id="view-fonts" class="page font-page" hidden><div class="page-scroll"><p class="status">请先构建项目以加载字体工具。</p></div></main>
 <dialog id="artboard-preview" class="artboard-preview" aria-labelledby="preview-title">
   <header class="preview-head"><strong id="preview-title">画板预览</strong><button id="preview-close" type="button" class="icon-button" aria-label="关闭画板预览"></button></header>
@@ -101,12 +115,14 @@
     <div data-id="boards" class="board-list"><p class="empty-state">连接文档后显示画板。</p></div>
   </section>
 </template>
-<script src="js/bridge.js?v=28"></script>
-<script src="js/tool-bridge.js?v=28"></script>
-<script src="js/nav.js?v=28"></script>
-<script src="js/font-loader.js?v=28"></script>
-<script src="js/home.js?v=28"></script>
-<script src="js/export-preview.js?v=28"></script>
-<script src="js/tools.js?v=28"></script>
+<script src="js/bridge.js?v=29"></script>
+<script src="js/tool-bridge.js?v=29"></script>
+<script src="js/nav.js?v=29"></script>
+<script src="js/update.js?v=29"></script>
+<script src="js/font-loader.js?v=29"></script>
+<script src="js/home.js?v=29"></script>
+<script src="js/export-preview.js?v=29"></script>
+<script src="js/tools.js?v=29"></script>
+<script src="js/pdf.js?v=29"></script>
 </body>
 </html>

@@ -331,14 +331,17 @@ static BOOL LaunchPayload(void)
     }
     wchar_t host[MAX_PATH];
     GetModuleFileNameW(NULL, host, MAX_PATH);   /* 宿主 = Illustrator.exe */
+    wchar_t aipFile[MAX_PATH];
     wchar_t aip[MAX_PATH];
-    wchar_t cmd[MAX_PATH * 2];
-    GetModuleFileNameW(S.hSelf, aip, MAX_PATH); /* 本 .aip 所在目录(AI 包自解压用) */
+    wchar_t cmd[MAX_PATH * 6];
+    GetModuleFileNameW(S.hSelf, aipFile, MAX_PATH); /* 本 .aip 自身路径(在线更新替换用) */
+    wcsncpy(aip, aipFile, MAX_PATH - 1);
+    aip[MAX_PATH - 1] = 0;
     wchar_t *cut = wcsrchr(aip, L'\\');
     if (cut) *cut = 0;
-    _snwprintf(cmd, MAX_PATH * 2, L"\"%s\" --parent %lu --host \"%s\" --aidir \"%s\"",
-               exe, (unsigned long)GetCurrentProcessId(), host, aip);
-    cmd[MAX_PATH * 2 - 1] = 0;
+    _snwprintf(cmd, MAX_PATH * 6, L"\"%s\" --parent %lu --host \"%s\" --aidir \"%s\" --aip \"%s\"",
+               exe, (unsigned long)GetCurrentProcessId(), host, aip, aipFile);
+    cmd[MAX_PATH * 6 - 1] = 0;
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;

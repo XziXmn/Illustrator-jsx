@@ -37,8 +37,25 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -RunStandalone   # 构建并�
 - `references/字醒/web/index.html`、`web/js/{core,paddle-ocr,native-runtime,panel}.js` 与 `host/{main,guard}.jsx`，作为字体模块的构建输入。
 - `core/libs/` 下的 `Microsoft.Web.WebView2.Core.dll`、`Microsoft.Web.WebView2.WinForms.dll`、`WebView2Loader.dll`；当前使用版本为 1.0.4314.35。
 - OCR 运行资源按需放在 `references/字醒/web/ocr/`、`core/libs/ocr/` 和 `core/ocr/server/`。模型不随源码分发。
+- PDF 转曲所需的 qpdf 12.4.2 与 Ghostscript 10.08 由 `tools/fetch-deps.ps1` 下载到 `core/tools/`(不入库)；构建时缺失会自动拉取。
 
 当前构建脚本使用本机工具路径；换机时先核对 `$gcc`、`$windres` 和 `$csc`。
+
+## 在线更新
+
+`update.json` 是版本清单(版本、Tag、资产名、SHA-256、说明)，位于仓库根目录。面板「工具目录」底部提供「检查更新」：
+
+- 清单按 `gh-proxy` → `ghfast` → `ghproxy` → jsDelivr → raw.githubusercontent 依次回退，国内网络可直接使用。
+- 发布包从 GitHub Release 下载，同样按镜像回退；下载后校验 SHA-256，再交给后台脚本，在 Illustrator 退出后替换 `.aip` 并重新打开。
+- 设置 `YUNLI_UPDATE_MANIFEST` / `YUNLI_UPDATE_ASSET` 可指向自建镜像或本地文件做测试。
+
+发布新版本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/release.ps1 -Notes "更新说明" -Publish
+```
+
+脚本读取 `core/src/Program.cs` 的 `Version`，构建单文件版，创建/更新 `yunli-v<版本>` Release，并重写 `update.json`；提交推送该文件后面板即可检查到新版本。
 
 ## 定向验证
 

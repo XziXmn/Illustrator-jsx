@@ -1,0 +1,8 @@
+{
+  "version": "0.3.0",
+  "tag": "yunli-v0.3.0",
+  "asset": "YunLiTools.aip",
+  "sha256": "",
+  "notes": "新增 PDF 转曲（嵌入 qpdf 与 Ghostscript），面板支持在线检查更新",
+  "published": "2026-11-20"
+}
