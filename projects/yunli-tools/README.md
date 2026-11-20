@@ -43,7 +43,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -RunStandalone   # 构建并�
 
 ## 在线更新
 
-`update.json` 是版本清单(版本、Tag、资产名、SHA-256、说明)，位于仓库根目录。面板「工具目录」底部提供「检查更新」：
+`update.json` 是版本清单(版本、Tag、资产名、SHA-256、说明)，位于仓库根目录。面板首页连接行提供「检查更新」：
 
 - 清单按 `gh-proxy` → `ghfast` → `ghproxy` → jsDelivr → raw.githubusercontent 依次回退，国内网络可直接使用。
 - 发布包从 GitHub Release 下载，同样按镜像回退；下载后校验 SHA-256，再交给后台脚本，在 Illustrator 退出后替换 `.aip` 并重新打开。

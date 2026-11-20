@@ -10,6 +10,7 @@
 
   function setState(text, kind) {
     state.textContent = text;
+    state.hidden = !text;
     state.className = "hint update-state" + (kind ? " " + kind : "");
   }
   function setBusy(on, label) {

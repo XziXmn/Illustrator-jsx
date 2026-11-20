@@ -27,10 +27,10 @@ async function measure(page) {
     return {
       width: Math.round(main.getBoundingClientRect().width),
       viewport: innerWidth,
-      directoryItems: document.querySelectorAll("#yunli-tools .tool-entry").length,
-      expectedItems: 1 + YunLiNavData.groups.reduce((sum,group) => sum + group.items.length,0),
+      homeItems: document.querySelectorAll("#home-groups .tool-entry").length,
+      expectedItems: YunLiNavData.groups.reduce((sum,group) => sum + group.items.filter(item => !item.disabled).length,0),
       heading: main.querySelector(".page-heading h1")?.firstChild.textContent,
-      active: document.querySelector("#yunli-tools [aria-current]")?.getAttribute("data-feature"),
+      active: document.querySelector("#home-groups [aria-current]")?.getAttribute("data-feature"),
       overflow: [main,...main.querySelectorAll(".page-scroll,.zone,.modes,.board-list")].filter(e => e.getClientRects().length && e.scrollWidth > e.clientWidth + 1).map(e => e.id || e.className),
       badFields: fields.filter(e => { const r = e.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth + 1 || r.height < 25; }).map(e => e.id),
       footerVisible: !footer || footer.getBoundingClientRect().bottom <= innerHeight + 1,
@@ -84,8 +84,8 @@ async function routeAssets(page) {
       const result = await measure(page);
       const label = surface + " " + width + "x" + height + " " + theme;
       assert.equal(result.width,result.viewport,label + " 主区域宽度");
-      assert.equal(result.directoryItems,result.expectedItems,label + " 目录完整性");
-      assert.equal(result.active,font ? "fonts" : surface,label + " 当前导航");
+      assert.equal(result.homeItems,result.expectedItems,label + " 首页入口完整性");
+      assert.equal(result.active,surface === "home" ? undefined : (font ? "fonts" : surface),label + " 当前导航");
       assert.equal(result.heading,font ? "字体与文字" : {home:"工作台",marks:"印刷标记",export:"工艺导出",pdf:"PDF 转曲"}[surface],label + " 页面标题");
       assert.deepEqual(result.overflow,[],label + " 横向溢出");
       assert.deepEqual(result.badFields,[],label + " 控件裁剪或高度异常");
@@ -159,24 +159,6 @@ async function routeAssets(page) {
     await brokenPicture.keyboard.press("Escape");
     await brokenPicture.locator("#artboard-preview").waitFor({state:"hidden"});
     await brokenPicture.close();
-    // 大目录验证：滚动、搜索、空结果、清空均使用真实组件。
-    const stress = await browser.newPage({viewport:{width:272,height:400}});
-    await routeAssets(stress);
-    await stress.addInitScript(mock);
-    await stress.goto("http://local.test/index.html?catalog-stress=1");
-    await stress.getByRole("button",{name:"工具目录",exact:true}).click();
-    assert.equal(await stress.locator("#yunli-tools .tool-entry").count(),103);
-    assert.ok(await stress.locator("#directory-catalog .catalog-groups").evaluate(e => e.scrollHeight > e.clientHeight));
-    const search = stress.getByRole("searchbox",{name:"搜索工具目录",exact:true});
-    await search.fill("扩展工具 8-12");
-    assert.equal(await stress.locator("#yunli-tools .tool-entry").count(),1);
-    await search.fill("不存在的工具");
-    assert.ok(await stress.locator("#directory-catalog .empty-state").isVisible());
-    await search.fill("");
-    assert.equal(await stress.locator("#yunli-tools .tool-entry").count(),103);
-    await stress.keyboard.press("Escape");
-    assert.equal(await stress.locator("#directory-toggle").getAttribute("aria-expanded"),"false");
-    await stress.close();
-    console.log(count + "/" + sizes.length * surfaces.length * 2 + " 布局检查通过，103 个工具目录检查通过（模拟桥）");
+    console.log(count + "/" + sizes.length * surfaces.length * 2 + " 布局检查通过（模拟桥）");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -113,15 +113,4 @@
       }
     });
   }
-  // 只在带参数的本地预览中增加 96 个入口，检查目录增长后的搜索与滚动。
-  if (new URLSearchParams(location.search).has("catalog-stress")) document.addEventListener("DOMContentLoaded", function () {
-    for (var group = 1; group <= 8; group++) {
-      var items = [];
-      for (var index = 1; index <= 12; index++) items.push({ id: "preview-" + group + "-" + index, title: "扩展工具 " + group + "-" + index, desc: "仅用于目录容量验证", disabled: true });
-      YunLiNavData.groups.push({ id: "preview-group-" + group, title: "扩展分组 " + group, items: items });
-    }
-    var home = document.getElementById("home-groups");
-    if (home) YunLiUI.mountCatalog(home, "搜索首页工具", false);
-    YunLiUI.mountCatalog(document.getElementById("directory-catalog"), "搜索工具目录", true);
-  });
 })();

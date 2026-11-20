@@ -124,15 +124,6 @@
 
   var header = el("header", "app-header");
   var bar = el("div", "app-brand");
-  var menu = el("button", "icon-button directory-toggle");
-  menu.type = "button";
-  menu.id = "directory-toggle";
-  menu.setAttribute("popovertarget", "yunli-tools");
-  menu.setAttribute("aria-label", "工具目录");
-  menu.setAttribute("aria-controls", "yunli-tools");
-  menu.setAttribute("aria-expanded", "false");
-  menu.appendChild(icon("menu"));
-  bar.appendChild(menu);
   var brand = el("a", "brand-name", "YunLi");
   brand.href = href(home);
   brand.setAttribute("aria-label", "返回工作台");
@@ -159,53 +150,6 @@
   header.appendChild(bar);
   document.body.insertBefore(header, document.body.firstChild);
 
-  var directory = el("nav", "tool-directory");
-  directory.id = "yunli-tools";
-  directory.setAttribute("popover", "auto");
-  directory.setAttribute("aria-label", "工具目录");
-  var head = el("div", "directory-head");
-  head.appendChild(el("strong", "", "工具目录"));
-  var close = el("button", "icon-button");
-  close.type = "button";
-  close.setAttribute("aria-label", "关闭工具目录");
-  close.appendChild(icon("close"));
-  close.addEventListener("click", function () { directory.hidePopover(); menu.focus(); });
-  head.appendChild(close);
-  directory.appendChild(head);
-  var catalog = el("div");
-  catalog.id = "directory-catalog";
-  directory.appendChild(catalog);
-  document.body.appendChild(directory);
-  mountCatalog(catalog, "搜索工具目录", true);
-
-  // 目录底部:当前版本与在线更新入口(update.js 绑定)。
-  var foot = el("div", "directory-foot");
-  var versionLabel = el("span", "hint", "—");
-  versionLabel.id = "update-version";
-  versionLabel.setAttribute("data-yunli-version", "");
-  var update = el("button", "link", "检查更新");
-  update.type = "button";
-  update.id = "update-check";
-  foot.appendChild(versionLabel);
-  foot.appendChild(update);
-  directory.appendChild(foot);
-  var updateState = el("p", "hint update-state");
-  updateState.id = "update-state";
-  directory.appendChild(updateState);
-
-  directory.addEventListener("toggle", function (event) { menu.setAttribute("aria-expanded", String(event.newState === "open")); });
-  // 浏览器自带的 Escape 轻关闭不一定触发 toggle,这里补一次状态同步并确保真的关闭。
-  document.addEventListener("keydown", function (event) {
-    if (event.key !== "Escape") return;
-    if (directory.matches(":popover-open")) directory.hidePopover();
-    menu.setAttribute("aria-expanded", "false");
-  });
-  directory.addEventListener("click", function (event) {
-    if (event.target.closest("a")) {
-      directory.hidePopover();
-      menu.focus();
-    }
-  });
   window.YunLiRenderNav = renderSelection;
   window.addEventListener("hashchange", renderSelection);
   renderSelection();

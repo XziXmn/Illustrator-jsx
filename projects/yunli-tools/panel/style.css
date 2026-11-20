@@ -124,20 +124,6 @@ a.tool-entry:hover { background:var(--subtle); }
 .board:has(input:not(:checked)) select { display:none; }
 .empty-state { margin:0; padding:12px 0; color:var(--muted); font-size:var(--text-body); }
 @media(min-width:600px) { .cols { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-/* 目录使用顶层 popover，不占据面板内容宽度；功能数增加时列表滚动。 */
-.tool-directory { position:fixed; inset:50px auto 8px 8px; width:min(320px,calc(100vw - 16px)); height:auto; max-height:calc(100dvh - 58px); margin:0; padding:12px; color:var(--ink); border:1px solid var(--line); border-radius:20px; background:var(--popover); backdrop-filter:blur(20px); box-shadow:0 8px 32px #0002; }
-.tool-directory:popover-open { display:flex; flex-direction:column; }
-.directory-head { display:flex; flex:none; align-items:center; justify-content:space-between; margin-bottom:8px; font-size:var(--text-heading); line-height:var(--line-heading); }
-.catalog { display:flex; flex-direction:column; gap:var(--item-gap); min-height:0; }
-.catalog-search { flex:none; }
-.catalog-groups { min-height:0; }
-.tool-directory .catalog { flex:1; }
-.tool-directory .catalog-groups { overflow:auto; overscroll-behavior:contain; }
-.tool-directory .tool-entry { padding:var(--space-2); gap:var(--item-gap); }
-.tool-directory .tool-list { border:0; background:transparent; }
-.tool-directory .tool-entry+.tool-entry { border:0; }
-.tool-directory .tool-entry { border-radius:12px; }
-
 /* 首页是紧凑工具入口，说明放在提示中，未开放项目保留在完整目录。 */
 #view-home .document-context { display:flex; align-items:center; gap:8px; min-width:0; max-width:640px; height:20px; margin:0 auto 8px; }
 #view-home .connrow { flex:none; margin:0; }
@@ -212,8 +198,9 @@ a.tool-entry:hover { background:var(--subtle); }
 @media(max-width:320px) { .tool-page { --number-width:48px; } }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation:none!important; transition:none!important; } }
 
-/* 工具目录底部:版本与在线更新 */
-.directory-foot { display:flex; flex:none; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; padding-top:8px; border-top:1px solid var(--line); }
-.update-state { margin:4px 0 0; }
+/* 首页:版本与在线更新（原工具目录底部） */
+#view-home .update-row { display:flex; align-items:center; gap:8px; max-width:640px; margin:0 auto 8px; }
+#view-home .update-row .link { padding:0; }
+#view-home .update-state { max-width:640px; margin:0 auto 8px; }
 .update-state.ok { color:var(--ink); }
 .update-state.err { color:var(--danger); }
