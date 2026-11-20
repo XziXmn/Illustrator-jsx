@@ -31,7 +31,7 @@
 .font-page .cand.far { color:var(--muted); }
 .font-page .manual-font,.font-page .row-details select { margin-top:var(--item-gap); }
 .font-page details summary { cursor:pointer; color:var(--muted); }
-.font-page .settings,.font-page .module-credit { margin-top:var(--section-gap); padding-top:var(--item-gap); border-top:1px solid var(--line); }
+.font-page .settings { margin-top:var(--section-gap); padding-top:var(--item-gap); border-top:1px solid var(--line); }
 .font-page .settings>label { display:flex; flex-wrap:wrap; align-items:center; gap:var(--item-gap); margin-top:var(--row-gap); }
 .font-page .settings select { width:auto; max-width:100%; }
 .font-page .settings .link { display:inline-block; margin:8px 12px 0 0; }

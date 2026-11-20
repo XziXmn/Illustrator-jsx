@@ -32,7 +32,8 @@ function Copy-YunLiFontAssets([string]$webDir, [string]$assetsDir) {
     # 隐藏的 license-badge 仍被字体运行时引用，替换标题时保留此节点。
     $html = $html.Replace('<header><h1>字醒<span id="license-badge" class="badge" hidden>永久版</span></h1><span>开发者：酥脆</span></header>', '<header class="page-heading"><h1 id="font-title">字体与文字<span id="license-badge" class="badge" hidden>永久版</span></h1><p>识别、恢复与批量整理文字。</p></header>')
     $html = [regex]::Replace($html, '(<button id="tab-[^"]+")', '$1 class="secondary" disabled')
-    $html = $html.Replace('<footer id="version">', '<details class="module-credit"><summary>模块来源</summary><p class="hint">字体模块参考「字醒」，原开发者：酥脆。</p></details><footer id="font-version">')
+    # 字体页并进主面板后 id 必须唯一；原来的「模块来源」说明已移除。
+    $html = $html.Replace('<footer id="version">', '<footer id="font-version">')
     $html = $html.Replace("</head>", '<script src="theme-boot.js"></script></head>')
     # 首帧直接使用最终布局，避免 OCR 运行时加载后再搬动内容和按钮。
     $fontActions = '<div class="page-foot font-foot">'
