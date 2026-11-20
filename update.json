@@ -1,8 +1,8 @@
 {
-    "version":  "0.3.2",
-    "tag":  "yunli-v0.3.2",
+    "version":  "0.3.3",
+    "tag":  "yunli-v0.3.3",
     "asset":  "YunLiTools.aip",
-    "sha256":  "11754d1fe0ef5c81d92aafc4cb7ecd41284f278084cabe50dadacc933847106e",
-    "notes":  "移除左侧工具目录，工具入口集中在首页；版本与「检查更新」移到首页连接行；字体页去掉模块来源说明。",
+    "sha256":  "0730bd5f1c4df6eddd85457b3f52b818d916bba12797017cda23809dfa873441",
+    "notes":  "PDF 转曲支持 PDF 兼容的 .ai；更新入口移到首页底部并修正版本号与按钮对齐。",
     "published":  "2026-11-20"
 }
