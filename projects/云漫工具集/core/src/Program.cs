@@ -32,7 +32,7 @@ namespace YunLi.Core
 {
     internal static class Program
     {
-        public const string Version = "0.3.0";
+        public const string Version = "0.3.1";
 
         internal static string AipPath;
         internal static string HostPath;
@@ -98,6 +98,15 @@ namespace YunLi.Core
                         ex.Message.Replace("\\", "\\\\").Replace("\"", "'") + "\"}", new UTF8Encoding(false));
                     Log("selftest-fail " + ex);
                 }
+                return 0;
+            }
+            int assetsTest = Array.IndexOf(args, "--selftest-assets");
+            if (assetsTest >= 0)
+            {
+                System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                string assetsPath = ResolveAssets();
+                watch.Stop();
+                Log("assets-selftest " + watch.ElapsedMilliseconds + "ms " + assetsPath);
                 return 0;
             }
             int pdfTest = Array.IndexOf(args, "--selftest-pdf");
@@ -221,54 +230,82 @@ namespace YunLi.Core
                 Directory.CreateDirectory(adjacent);
                 return adjacent;
             }
+
             string store = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "YunLi", "assets");
-            Directory.CreateDirectory(store);
-            // 指纹缓存:内嵌包没变就跳过解压(224MB,首启慢、之后秒开)
-            string payloadHash = Sha256Hex(zipStream);
             string hashFile = Path.Combine(store, ".payload-hash");
-            bool needExtract = !(File.Exists(hashFile) && File.ReadAllText(hashFile).Trim() == payloadHash);
-            if (!needExtract)
+            string marker = Path.Combine(store, "web", "index.html");
+            // 指纹用 exe 的版本/大小/时间,避免每次启动重读 250MB 内嵌包。
+            string fingerprint = PayloadFingerprint();
+            if (File.Exists(marker) && File.Exists(hashFile)
+                && File.ReadAllText(hashFile).Trim() == fingerprint)
             {
                 Log("payload-cached " + store);
+                zipStream.Dispose();
                 return store;
             }
-            using (ZipArchive zip = new ZipArchive(zipStream, ZipArchiveMode.Read))
+
+            try
             {
-                foreach (ZipArchiveEntry entry in zip.Entries)
+                Directory.CreateDirectory(store);
+                string root = Path.GetFullPath(store) + Path.DirectorySeparatorChar;
+                using (ZipArchive zip = new ZipArchive(zipStream, ZipArchiveMode.Read))
                 {
-                    string target = Path.GetFullPath(Path.Combine(store, entry.FullName));
-                    if (!target.StartsWith(Path.GetFullPath(store) + Path.DirectorySeparatorChar,
-                        StringComparison.OrdinalIgnoreCase))
-                        throw new Exception("插件包路径无效。");
-                    string dir = Path.GetDirectoryName(target);
-                    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-                    using (Stream s = entry.Open())
-                    using (FileStream fs = File.Create(target))
-                        s.CopyTo(fs);
+                    foreach (ZipArchiveEntry entry in zip.Entries)
+                    {
+                        // ZIP 里的目录条目(如 tools/gs/Resource/)没有文件名,
+                        // 直接 File.Create 会落到 "...\Resource\" 上并抛“找不到路径的一部分”。
+                        if (entry.Name.Length == 0
+                            || entry.FullName.EndsWith("/")
+                            || entry.FullName.EndsWith("\\")) continue;
+                        string target = Path.GetFullPath(Path.Combine(store, entry.FullName));
+                        if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                            throw new Exception("插件包路径无效。");
+                        string dir = Path.GetDirectoryName(target);
+                        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                        using (Stream s = entry.Open())
+                        using (FileStream fs = File.Create(target))
+                            s.CopyTo(fs);
+                    }
                 }
+                // 发布模式: 把 WebView2 DLL 复制到 exe 目录,保证程序集与原生加载器可解析
+                foreach (string dll in Directory.GetFiles(store, "*.dll"))
+                {
+                    string dest = Path.Combine(baseDir, Path.GetFileName(dll));
+                    File.Copy(dll, dest, true);
+                }
+                File.WriteAllText(hashFile, fingerprint);
+                Log("payload-extracted " + store);
+                return store;
             }
-            // 发布模式: 把 WebView2 DLL 复制到 exe 目录,保证程序集与原生加载器可解析
-            foreach (string dll in Directory.GetFiles(store, "*.dll"))
+            catch (Exception ex)
             {
-                string dest = Path.Combine(baseDir, Path.GetFileName(dll));
-                File.Copy(dll, dest, true);
+                // 解压失败不要挡住整个插件:有可用面板就继续,具体工具缺资源时自行报错。
+                Log("payload-extract-failed " + ex.Message);
+                try { if (File.Exists(hashFile)) File.Delete(hashFile); }
+                catch (Exception) { }
+                if (File.Exists(marker)) return store;
+                Directory.CreateDirectory(adjacent);
+                return adjacent;
             }
-            File.WriteAllText(hashFile, payloadHash);
-            Log("payload-extracted " + store);
-            return store;
+            finally
+            {
+                zipStream.Dispose();
+            }
         }
 
-        private static string Sha256Hex(Stream stream)
+        // 内嵌载荷随 exe 编译,exe 的版本/大小/修改时间足以判断是否需要重新解压。
+        private static string PayloadFingerprint()
         {
-            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+            try
             {
-                byte[] hash = sha.ComputeHash(stream);
-                stream.Seek(0, SeekOrigin.Begin);
-                StringBuilder hex = new StringBuilder(hash.Length * 2);
-                foreach (byte b in hash) hex.Append(b.ToString("x2"));
-                return hex.ToString();
+                FileInfo info = new FileInfo(Assembly.GetExecutingAssembly().Location);
+                return Program.Version + "|" + info.Length + "|" + info.LastWriteTimeUtc.Ticks;
+            }
+            catch (Exception)
+            {
+                return Program.Version;
             }
         }
 
