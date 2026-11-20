@@ -24,6 +24,11 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) { throw "构建失败" }
 }
 if (-not (Test-Path $asset)) { throw "找不到发布包: $asset" }
+# 开发布局的壳只有几十 KB;打包版内嵌载荷,至少几十 MB。防止误传开发版。
+$size = (Get-Item $asset).Length
+if ($size -lt 20MB) {
+    throw "发布包只有 $size 字节,疑似开发版壳。请先运行 build.ps1 -Pack。"
+}
 
 $sha = (Get-FileHash $asset -Algorithm SHA256).Hash.ToLower()
 Write-Host "版本: $version"
@@ -32,16 +37,20 @@ Write-Host "产物: $asset"
 
 # 先发布、后写清单:发布失败时仓库里的 update.json 仍指向有效版本。
 if ($Publish) {
-    $exists = $false
-    gh release view $tag --repo XziXmn/Illustrator-jsx *> $null
-    if ($LASTEXITCODE -eq 0) { $exists = $true }
+    # gh 把进度写到 stderr;Stop 会把原生命令的 stderr 当成终止错误,这里临时放宽。
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    gh release view $tag --repo XziXmn/Illustrator-jsx 1> $null 2> $null
+    $exists = ($LASTEXITCODE -eq 0)
     if ($exists) {
         gh release upload $tag $asset --repo XziXmn/Illustrator-jsx --clobber
     } else {
         gh release create $tag $asset --repo XziXmn/Illustrator-jsx `
             --title "YunLi工具箱 $tag" --notes $Notes
     }
-    if ($LASTEXITCODE -ne 0) { throw "发布失败" }
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $previous
+    if ($code -ne 0) { throw "发布失败" }
     Write-Host "已发布 $tag"
 }
 
