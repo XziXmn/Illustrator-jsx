@@ -41,6 +41,13 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -RunStandalone   # 构建并�
 
 当前构建脚本使用本机工具路径；换机时先核对 `$gcc`、`$windres` 和 `$csc`。
 
+## 面板与快捷键
+
+- 插件启动时创建面板，并按上次状态恢复；关闭 Illustrator 前面板可见，下次启动会自动回到停靠位置。
+- 收起面板后的停靠图标由 `.aip` 内嵌的 SVG 资源提供。
+- 快捷键 **Ctrl+Alt+Shift+Y**（仅在 Illustrator 前台时响应）显示/展开面板。
+- 显示状态记录在 `%LOCALAPPDATA%\YunLi\panel-visible`。
+
 ## 在线更新
 
 `update.json` 是版本清单(版本、Tag、资产名、SHA-256、说明)，位于仓库根目录。面板首页连接行提供「检查更新」：

@@ -73,3 +73,4 @@
 - `python tools/uitest/serve.py dist/payload/assets/web 8736 tools/uitest/ui-preview.js` 启动模拟预览。
 - 构建后 `node tools/uitest/design-audit.cjs` 为回归入口；旧截图探针含早期导航选择器，以该脚本为准。
 - 模拟桥只能证明 UI 行为，不证明 OCR 质量或 Illustrator 的真实文档操作。
+- 面板在插件启动时创建，按上次的显示状态恢复停靠位置与图标；收起时的图标使用内嵌 SVG 资源。快捷键 **Ctrl+Alt+Shift+Y** 仅在 Illustrator 为前台窗口时生效。

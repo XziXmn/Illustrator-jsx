@@ -65,6 +65,7 @@ typedef struct AIPlatformAddMenuItemDataUS AIPlatformAddMenuItemDataUS;
 
 typedef void (*PanelSizeChangedProc)(AIPanelRef);
 typedef void (*PanelStateChangedProc)(AIPanelRef, short);
+typedef void (*PanelVisibilityChangedProc)(AIPanelRef, int);
 typedef void (*PanelClosedProc)(AIPanelRef);
 
 struct AIMenuSuite {                      /* v11, 仅声明用到的槽位 */
@@ -80,19 +81,27 @@ struct AIUnicodeStringSuite {             /* v10 */
     SPErr (*Destroy)(UStr *str);                                   /* slot3 */
 };
 
-struct AIPanelSuite {                     /* v4 */
+struct AIPanelSuite {                     /* v4, 槽位见 AIPanel.h */
     SPErr (*Create)(SPPluginRef self, UStr *inID, UStr *inTitle,
                     short inStateCount, struct AISize *inMinSize, int isResizable,
                     void *inFlyoutMenu, void *inUserData, AIPanelRef *outPanel);
     SPErr (*Destroy)(AIPanelRef inPanel);                          /* slot1 */
     SPErr (*GetPlatformWindow)(AIPanelRef inPanel, HWND *out);     /* slot2 */
     SPErr (*Show)(AIPanelRef inPanel, int inShow);                 /* slot3 */
-    void *pad4_12[9];                                              /* slot4..12 */
+    void *pad4_8[5];                                               /* slot4..8 */
+    void *SetIcon;                                                 /* slot9 */
+    void *SetIconResourceID;                                       /* slot10 */
+    SPErr (*SetSVGIconResourceID)(AIPanelRef inPanel, unsigned int iconResId,
+                                  unsigned int darkIconResId);      /* slot11 */
+    void *pad12;                                                   /* slot12 */
     SPErr (*SetMinimumSize)(AIPanelRef inPanel, struct AISize *s); /* slot13 */
     void *pad14_16[3];                                             /* slot14..16 */
     SPErr (*SetPreferredSizes)(AIPanelRef inPanel, struct AISize *s); /* slot17 */
-    void *pad18_35[18];                                            /* slot18..35 */
+    void *pad18_34[17];                                            /* slot18..34 */
+    SPErr (*SetVisibilityChangedNotifyProc)(AIPanelRef, PanelVisibilityChangedProc); /* slot35 */
     SPErr (*SetSizeChangedNotifyProc)(AIPanelRef, PanelSizeChangedProc);   /* slot36 */
+    SPErr (*SetStateChangedNotifyProc)(AIPanelRef, PanelStateChangedProc); /* slot37 */
+    SPErr (*SetClosedNotifyProc)(AIPanelRef, PanelClosedProc);             /* slot38 */
 };
 
 struct AINotifierSuite {                  /* v5 */
@@ -141,7 +150,18 @@ static struct {
     HANDLE childProcess;
     HANDLE childThread;
     HMODULE hSelf;
+    HWND msgWnd;              /* 隐藏消息窗:快捷键与停靠轮询 */
+    HHOOK keyboardHook;
+    DWORD childPid;
+    int dockTries;
+    int shuttingDown;
 } S;
+
+#define WM_YUNLI_SHOW  (WM_APP + 1)
+#define WM_YUNLI_DOCK  (WM_APP + 2)
+#define DOCK_TIMER_ID  1
+#define PANEL_ICON_LIGHT 200
+#define PANEL_ICON_DARK  201
 
 /* ---------------- 日志: %LOCALAPPDATA%\YunLi\startup.log ---------------- */
 static void Log(const char *stage, long code)
@@ -322,8 +342,118 @@ static void FitDock(void)
 
 static void WINAPI OnPanelSizeChanged(AIPanelRef panel) { (void)panel; FitDock(); }
 
-static BOOL LaunchPayload(void)
+/* ---------------- 面板显示状态(跨启动记忆) ---------------- */
+static void PanelStatePath(wchar_t *out, size_t cch)
 {
+    out[0] = 0;
+    wchar_t base[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, base))) return;
+    _snwprintf(out, cch, L"%s\\YunLi\\panel-visible", base);
+    out[cch - 1] = 0;
+}
+
+static BOOL LoadPanelVisible(void)
+{
+    wchar_t path[MAX_PATH];
+    PanelStatePath(path, MAX_PATH);
+    if (!path[0]) return FALSE;
+    HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                           NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return FALSE;
+    char c = 0;
+    DWORD read = 0;
+    ReadFile(h, &c, 1, &read, NULL);
+    CloseHandle(h);
+    return read == 1 && c == '1';
+}
+
+static void SavePanelVisible(int visible)
+{
+    wchar_t path[MAX_PATH];
+    PanelStatePath(path, MAX_PATH);
+    if (!path[0]) return;
+    wchar_t dir[MAX_PATH];
+    lstrcpynW(dir, path, MAX_PATH);
+    wchar_t *slash = wcsrchr(dir, L'\\');
+    if (slash) *slash = 0;
+    CreateDirectoryW(dir, NULL);
+    HANDLE h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    char c = visible ? '1' : '0';
+    DWORD written = 0;
+    WriteFile(h, &c, 1, &written, NULL);
+    CloseHandle(h);
+}
+
+/* ---------------- 快捷键(仅 Illustrator 前台生效) ---------------- */
+static BOOL IsIllustratorForeground(void)
+{
+    HWND fg = GetForegroundWindow();
+    if (!fg) return FALSE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    return pid == GetCurrentProcessId();
+}
+
+static void DockChild(void);
+static void TryDock(void);
+static SPErr ShowPanel(void);
+static void WINAPI OnPanelVisibilityChanged(AIPanelRef panel, int visible);
+static void WINAPI OnPanelClosed(AIPanelRef panel);
+
+static LRESULT CALLBACK HiddenWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    (void)lp;
+    if (msg == WM_YUNLI_SHOW) { ShowPanel(); return 0; }
+    if (msg == WM_TIMER && wp == DOCK_TIMER_ID) { TryDock(); return 0; }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+static BOOL EnsureMessageWindow(void)
+{
+    if (S.msgWnd) return TRUE;
+    static const wchar_t *kClass = L"YunLiMessageWindow";
+    WNDCLASSEXW wc;
+    ZeroMemory(&wc, sizeof(wc));
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = HiddenWndProc;
+    wc.hInstance = S.hSelf;
+    wc.lpszClassName = kClass;
+    RegisterClassExW(&wc);
+    S.msgWnd = CreateWindowExW(0, kClass, L"", 0, 0, 0, 0, 0,
+                               HWND_MESSAGE, NULL, S.hSelf, NULL);
+    Log("message-window", S.msgWnd ? 0 : GetLastError());
+    return S.msgWnd != NULL;
+}
+
+static LRESULT CALLBACK LowLevelKeyboardProc(int code, WPARAM wp, LPARAM lp)
+{
+    if (code == HC_ACTION && (wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN)) {
+        KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT *)lp;
+        if (kb->vkCode == 'Y'
+            && (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            && (GetAsyncKeyState(VK_MENU) & 0x8000)
+            && (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            && IsIllustratorForeground()) {
+            if (S.msgWnd) PostMessageW(S.msgWnd, WM_YUNLI_SHOW, 0, 0);
+            return 1;   /* 只吞掉 Illustrator 前台时的组合键 */
+        }
+    }
+    return CallNextHookEx(S.keyboardHook, code, wp, lp);
+}
+
+static void InstallShortcut(void)
+{
+    if (S.keyboardHook) return;
+    S.keyboardHook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, S.hSelf, 0);
+    Log("shortcut-hook", S.keyboardHook ? 0 : GetLastError());
+}
+
+/* ---------------- 载荷进程与停靠 ---------------- */
+static BOOL StartPayload(void)
+{
+    if (S.childProcess) return TRUE;
     wchar_t exe[MAX_PATH];
     if (!FindDevPayload(exe, MAX_PATH) && !ExtractPayload(exe, MAX_PATH)) {
         Log("no-payload", 0);
@@ -354,35 +484,57 @@ static BOOL LaunchPayload(void)
     }
     S.childProcess = pi.hProcess;
     S.childThread = pi.hThread;
+    S.childPid = pi.dwProcessId;
+    Log("payload-started", 0);
+    return TRUE;
+}
 
+static void DockChild(void)
+{
     struct FindChildCtx ctx;
-    ctx.pid = pi.dwProcessId;
+    ctx.pid = S.childPid;
     ctx.hwnd = NULL;
-    for (int i = 0; i < 100 && !ctx.hwnd; i++) {
-        Sleep(100);
-        EnumWindows(FindChildProc, (LPARAM)&ctx);
-    }
-    if (!ctx.hwnd) { Log("dock-window", 0); return FALSE; }
+    EnumWindows(FindChildProc, (LPARAM)&ctx);
+    if (!ctx.hwnd || !S.panelWindow) return;
     S.childWindow = ctx.hwnd;
-
     LONG_PTR style = GetWindowLongPtrW(S.childWindow, GWL_STYLE);
     SetWindowLongPtrW(S.childWindow, GWL_STYLE,
                       (style & ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME)) | WS_CHILD);
     SetParent(S.childWindow, S.panelWindow);
     FitDock();
     Log("dock-show", 0);
-    return TRUE;
+}
+
+static void TryDock(void)
+{
+    if (!S.childWindow && S.childPid) {
+        DockChild();
+        if (S.childWindow) {
+            if (S.msgWnd) KillTimer(S.msgWnd, DOCK_TIMER_ID);
+            return;
+        }
+    } else if (S.childWindow) {
+        FitDock();
+        if (S.msgWnd) KillTimer(S.msgWnd, DOCK_TIMER_ID);
+        return;
+    }
+    if (++S.dockTries > 100) {
+        if (S.msgWnd) KillTimer(S.msgWnd, DOCK_TIMER_ID);
+        Log("dock-window-timeout", 0);
+    }
+}
+
+static void BeginDock(void)
+{
+    if (!S.msgWnd) { DockChild(); return; }
+    S.dockTries = 0;
+    SetTimer(S.msgWnd, DOCK_TIMER_ID, 100, NULL);
 }
 
 /* ---------------- 面板 ---------------- */
-static SPErr ShowOrLaunch(void)
+static SPErr EnsurePanel(void)
 {
-    if (S.panel && S.panelSuite) {
-        S.panelSuite->Show(S.panel, 1);
-        Log("dock-show", 0);
-        if (S.childWindow) FitDock();
-        return kNoErr;
-    }
+    if (S.panel) return kNoErr;
     UStr id = {0}, title = {0};
     S.ustr->InitializeUTF16(&id, (const unsigned short *)PANEL_ID_W,
                             (int)wcslen(PANEL_ID_W));
@@ -400,20 +552,67 @@ static SPErr ShowOrLaunch(void)
     S.panelSuite->SetMinimumSize(S.panel, &minSize);
     S.panelSuite->SetPreferredSizes(S.panel, &preferred);
     S.panelSuite->SetSizeChangedNotifyProc(S.panel, OnPanelSizeChanged);
-    S.panelSuite->Show(S.panel, 1);
-    S.panelSuite->GetPlatformWindow(S.panel, &S.panelWindow);
+    S.panelSuite->SetVisibilityChangedNotifyProc(S.panel, OnPanelVisibilityChanged);
+    S.panelSuite->SetClosedNotifyProc(S.panel, OnPanelClosed);
+    SPErr iconErr = S.panelSuite->SetSVGIconResourceID(S.panel, PANEL_ICON_LIGHT, PANEL_ICON_DARK);
+    Log("panel-icon", iconErr);
     Log("panel-created", 0);
+    return kNoErr;
+}
 
-    if (!LaunchPayload()) {
-        Log("launch-failed", 0);
-        return kMissingSuiteErr;
+static SPErr ShowPanel(void)
+{
+    SPErr err = EnsurePanel();
+    if (err) return err;
+    /* 核心进程异常退出后,再次显示面板应当重新拉起。 */
+    if (S.childProcess && WaitForSingleObject(S.childProcess, 0) == WAIT_OBJECT_0) {
+        CloseHandle(S.childProcess);
+        if (S.childThread) CloseHandle(S.childThread);
+        S.childProcess = S.childThread = NULL;
+        S.childWindow = NULL;
+        S.childPid = 0;
+    }
+    S.panelSuite->Show(S.panel, 1);
+    if (!S.panelWindow) S.panelSuite->GetPlatformWindow(S.panel, &S.panelWindow);
+    if (!S.childWindow) {
+        if (!S.childProcess && !StartPayload()) return kMissingSuiteErr;
+        BeginDock();
+    } else {
+        FitDock();
     }
     return kNoErr;
+}
+
+static void WINAPI OnPanelVisibilityChanged(AIPanelRef panel, int visible)
+{
+    (void)panel;
+    if (S.shuttingDown || !visible) return;
+    SavePanelVisible(1);
+    /* 工作区恢复出面板时不经过菜单,这里补启动核心并停靠。 */
+    if (!S.panelWindow) S.panelSuite->GetPlatformWindow(S.panel, &S.panelWindow);
+    if (!S.childWindow && !S.childProcess && StartPayload()) BeginDock();
+}
+
+static void WINAPI OnPanelClosed(AIPanelRef panel)
+{
+    (void)panel;
+    if (S.shuttingDown) return;
+    SavePanelVisible(0);
 }
 
 /* ---------------- 清理 ---------------- */
 static void Cleanup(void)
 {
+    S.shuttingDown = 1;
+    if (S.msgWnd) {
+        KillTimer(S.msgWnd, DOCK_TIMER_ID);
+        DestroyWindow(S.msgWnd);
+        S.msgWnd = NULL;
+    }
+    if (S.keyboardHook) {
+        UnhookWindowsHookEx(S.keyboardHook);
+        S.keyboardHook = NULL;
+    }
     if (S.childWindow) {
         SetParent(S.childWindow, NULL);
         ShowWindow(S.childWindow, SW_HIDE);
@@ -453,6 +652,12 @@ __declspec(dllexport) SPErr __cdecl PluginMain(char *caller, char *selector,
             AINotifierHandle nh = NULL;
             S.notifierSuite->AddNotifier(S.self, PLUGIN_NAME_YM,
                                          kNotifShutdown, &nh);
+            /* 启动时就建面板,AI 工作区才能恢复停靠图标;是否显示按上次状态。 */
+            EnsureMessageWindow();
+            InstallShortcut();
+            if (EnsurePanel() == kNoErr && LoadPanelVisible()) {
+                ShowPanel();
+            }
             Log("startup-ready", 0);
             return kNoErr;
         }
@@ -466,7 +671,7 @@ __declspec(dllexport) SPErr __cdecl PluginMain(char *caller, char *selector,
     if (lstrcmpA(caller, kCallerMenu) == 0) {
         struct AIMenuMessage *m = (struct AIMenuMessage *)message;
         if (lstrcmpA(selector, kSelMenuGo) == 0 && m->menuItem == S.menuItem) {
-            return ShowOrLaunch();
+            return ShowPanel();
         }
         return kNoErr;                      /* "AI Update" 等暂不处理 */
     }

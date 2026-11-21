@@ -8,3 +8,7 @@ plugin pipl "plugin.pipl"
 #ifdef YUNMAN_EMBED_PAYLOAD
 101 10 "payload.bin"    // 发布: 嵌入 YunLiCore.exe (类型10/名称101, 同字醒)
 #endif
+
+// 停靠面板收起时的图标(SVG,2x)
+200 svg "panel-light.svg"
+201 svg "panel-dark.svg"
