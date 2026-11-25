@@ -1,8 +1,14 @@
 {
-    "version":  "0.3.3",
-    "tag":  "yunli-v0.3.3",
+    "version":  "0.4.0",
+    "tag":  "yunli-v0.4.0",
     "asset":  "YunLiTools.aip",
-    "sha256":  "0730bd5f1c4df6eddd85457b3f52b818d916bba12797017cda23809dfa873441",
-    "notes":  "PDF 转曲支持 PDF 兼容的 .ai；更新入口移到首页底部并修正版本号与按钮对齐。",
-    "published":  "2026-11-20"
+    "sha256":  "c15464f2fb3b39c06212eb99ed918249791c0b599ad6427c6500198bf9b0c542",
+    "shellVersion":  2,
+    "hot":  {
+                "asset":  "YunLiHot-0.4.0.zip",
+                "sha256":  "534c9f0f009f23b95a9d8ed6d3564fe4f297bb803db0e8f1898de5178e7b3489",
+                "minShell":  2
+            },
+    "notes":  "新增图片分切（无损像素裁切与独立蒙版）与专色选择（5档浓度筛选与选区实时识别）；支持免重启 GitHub 轻量热更新并兼容旧版自动升级；统一界面下拉框样式并修复高分屏停靠显示。",
+    "published":  "2026-11-25"
 }
