@@ -1,14 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace ZiXing
+namespace YunLi.Core
 {
-    // 在线更新：从仓库版本清单读取最新版本，按国内镜像优先的顺序下载发布包，
-    // 校验 SHA-256 后交给后台脚本，在 Illustrator 退出后替换 .aip 并重新打开。
+    // 在线更新：
+    //   1. 从仓库 update.json 读取最新版本（国内镜像优先，GitHub 兜底）；
+    //   2. 新版壳（shellVersion >= minShell 且 IPC 可用）优先走轻量热更新包 YunLiHot-<ver>.zip，
+    //      解压到 %LOCALAPPDATA%\YunLi\hot\<ver>\ 并切换指针，通知 C 壳免重启热重载；
+    //   3. 旧版壳或涉及 C 壳变更的版本自动走全量 .aip 下载并在退出 Illustrator 后替换。
     public static class Update
     {
         private const string Repo = "XziXmn/Illustrator-jsx";
@@ -17,6 +23,11 @@ namespace ZiXing
         private const string CdnBase = "https://cdn.jsdelivr.net/gh/" + Repo + "@main/update.json";
 
         public static Dictionary<string, object> Check(string current)
+        {
+            return Check(current, 1, false);
+        }
+
+        public static Dictionary<string, object> Check(string current, int shellVersion, bool ipcAvailable)
         {
             string raw = null;
             string source = null;
@@ -46,6 +57,26 @@ namespace ZiXing
             string asset = Json.String(manifest, "asset");
             if (string.IsNullOrEmpty(asset)) asset = AssetName;
 
+            string hotAsset = "";
+            string hotSha256 = "";
+            string hotUrl = "";
+            int hotMinShell = 2;
+            object hotObj;
+            if (manifest.TryGetValue("hot", out hotObj) && hotObj is Dictionary<string, object>)
+            {
+                Dictionary<string, object> hot = (Dictionary<string, object>)hotObj;
+                hotAsset = Json.String(hot, "asset") ?? "";
+                hotSha256 = Json.String(hot, "sha256") ?? "";
+                hotUrl = Json.String(hot, "url") ?? "";
+                object minShellObj;
+                if (hot.TryGetValue("minShell", out minShellObj) && minShellObj != null)
+                {
+                    try { hotMinShell = Convert.ToInt32(minShellObj, CultureInfo.InvariantCulture); }
+                    catch (Exception) { hotMinShell = 2; }
+                }
+            }
+            bool canHot = ipcAvailable && !string.IsNullOrEmpty(hotAsset) && shellVersion >= hotMinShell;
+
             return new Dictionary<string, object> {
                 { "currentVersion", current },
                 { "latestVersion", latest },
@@ -54,6 +85,12 @@ namespace ZiXing
                 { "asset", asset },
                 { "sha256", Json.String(manifest, "sha256") ?? "" },
                 { "url", Json.String(manifest, "url") ?? "" },
+                { "canHot", canHot },
+                { "shellVersion", shellVersion },
+                { "hotAsset", hotAsset },
+                { "hotSha256", hotSha256 },
+                { "hotUrl", hotUrl },
+                { "hotMinShell", hotMinShell },
                 { "notes", Json.String(manifest, "notes") ?? "" },
                 { "published", Json.String(manifest, "published") ?? "" },
                 { "source", Host(source) }
@@ -63,27 +100,42 @@ namespace ZiXing
         public static Dictionary<string, object> Download(string version, string tag, string asset,
             string sha256, string explicitUrl, Action<long, long> progress)
         {
-            if (!Safe(version)) throw new Exception("版本号无效。");
             if (string.IsNullOrEmpty(asset)) asset = AssetName;
+            return DownloadCore(version, tag, asset, sha256, explicitUrl,
+                "YunLiTools-" + version + ".aip", false, progress);
+        }
+
+        public static Dictionary<string, object> DownloadHot(string version, string tag, string asset,
+            string sha256, string explicitUrl, Action<long, long> progress)
+        {
+            if (string.IsNullOrEmpty(asset)) asset = "YunLiHot-" + version + ".zip";
+            return DownloadCore(version, tag, asset, sha256, explicitUrl,
+                "YunLiHot-" + version + ".zip", true, progress);
+        }
+
+        static Dictionary<string, object> DownloadCore(string version, string tag, string asset,
+            string sha256, string explicitUrl, string localName, bool isHot, Action<long, long> progress)
+        {
+            if (!Safe(version)) throw new Exception("版本号无效。");
             if (!Safe(asset)) throw new Exception("文件名无效。");
             if (string.IsNullOrEmpty(tag) && string.IsNullOrEmpty(explicitUrl)) throw new Exception("缺少发布标记。");
 
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "YunLi", "updates");
             Directory.CreateDirectory(dir);
-            string file = Path.Combine(dir, "YunLiTools-" + version + ".aip");
+            string file = Path.Combine(dir, localName);
             if (File.Exists(file) && (string.IsNullOrEmpty(sha256) || Hash(file) == sha256.ToLowerInvariant()))
                 return Result(file, "", new FileInfo(file).Length, sha256 ?? "");
 
             string lastError = null;
-            foreach (string url in AssetSources(tag, asset, explicitUrl))
+            foreach (string url in AssetSources(tag, asset, explicitUrl, isHot))
             {
                 string part = file + ".part";
                 try { if (File.Exists(part)) File.Delete(part); }
                 catch (Exception) { }
                 try
                 {
-                    Http.File(url, part, 600000, progress);
+                    Http.File(url, part, isHot ? 180000 : 600000, progress);
                     string actual = Hash(part);
                     if (!string.IsNullOrEmpty(sha256) && actual != sha256.ToLowerInvariant())
                     {
@@ -102,6 +154,115 @@ namespace ZiXing
                 }
             }
             throw new Exception("下载失败：所有更新源都不可用。" + Short(lastError));
+        }
+
+        // 轻量热更新安装:
+        //   1. 解压 YunLiHot-<ver>.zip 到 %LOCALAPPDATA%\YunLi\hot\<ver>.staging\
+        //   2. 复用基线 WebView2/ONNX 运行时 DLL 与 WASM OCR 模型目录(junction/复制)
+        //   3. 原子切换 hot\current.txt 并备份 hot\previous.txt 供异常自动回滚
+        public static Dictionary<string, object> InstallHot(string zipPath, string version, string currentAssetsDir)
+        {
+            if (string.IsNullOrEmpty(zipPath) || !File.Exists(zipPath))
+                throw new Exception("热更新包不存在，请重新下载。");
+            if (!Safe(version))
+                throw new Exception("热更新版本号无效。");
+
+            string yunliRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YunLi");
+            string hotRoot = Path.Combine(yunliRoot, "hot");
+            Directory.CreateDirectory(hotRoot);
+
+            string targetDir = Path.Combine(hotRoot, version);
+            string baseFull = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string targetFull = Path.GetFullPath(targetDir)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(baseFull, targetFull, StringComparison.OrdinalIgnoreCase))
+                throw new Exception("当前已在运行 v" + version + "，无需重复热更新。");
+
+            string staging = Path.Combine(hotRoot, version + ".staging-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+            Directory.CreateDirectory(staging);
+            try
+            {
+                string fullStaging = Path.GetFullPath(staging) + Path.DirectorySeparatorChar;
+                using (ZipArchive archive = new ZipArchive(File.OpenRead(zipPath), ZipArchiveMode.Read))
+                {
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        if (entry.Name.Length == 0
+                            || entry.FullName.EndsWith("/")
+                            || entry.FullName.EndsWith("\\")) continue;
+                        string dest = Path.GetFullPath(Path.Combine(staging, entry.FullName));
+                        if (!dest.StartsWith(fullStaging, StringComparison.OrdinalIgnoreCase))
+                            throw new Exception("热更新包路径无效。");
+                        string d = Path.GetDirectoryName(dest);
+                        if (!Directory.Exists(d)) Directory.CreateDirectory(d);
+                        using (Stream s = entry.Open())
+                        using (FileStream fs = File.Create(dest))
+                            s.CopyTo(fs);
+                    }
+                }
+
+                if (!File.Exists(Path.Combine(staging, "YunLiCore.exe")) ||
+                    !File.Exists(Path.Combine(staging, "assets", "web", "index.html")))
+                {
+                    throw new Exception("热更新包缺少核心文件（YunLiCore.exe 或面板页面）。");
+                }
+
+                // 补齐运行时托管/原生 DLL（WebView2、ONNX Runtime 等），不覆盖热更包自带的新 DLL
+                string baselineAssets = Path.Combine(yunliRoot, "assets");
+                CopyMissingRuntimeDlls(AppDomain.CurrentDomain.BaseDirectory, staging);
+                CopyMissingRuntimeDlls(baselineAssets, staging);
+
+                // 复用基线的字体 WASM OCR 模型（~30MB），避免每个热更包重复下载
+                string dstFontOcr = Path.Combine(staging, "assets", "web", "font", "ocr");
+                if (!Directory.Exists(dstFontOcr))
+                {
+                    string srcFontOcr = null;
+                    string cand1 = string.IsNullOrEmpty(currentAssetsDir) ? null
+                        : Path.Combine(currentAssetsDir, "web", "font", "ocr");
+                    string cand2 = Path.Combine(baselineAssets, "web", "font", "ocr");
+                    if (!string.IsNullOrEmpty(cand1) && Directory.Exists(cand1)) srcFontOcr = cand1;
+                    else if (Directory.Exists(cand2)) srcFontOcr = cand2;
+                    if (!string.IsNullOrEmpty(srcFontOcr))
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(dstFontOcr));
+                        LinkOrCopyDirectory(srcFontOcr, dstFontOcr);
+                    }
+                }
+
+                if (Directory.Exists(targetDir)) SafeDeleteDir(targetDir);
+                Directory.Move(staging, targetDir);
+                staging = null;
+
+                string currentFile = Path.Combine(hotRoot, "current.txt");
+                string prevFile = Path.Combine(hotRoot, "previous.txt");
+                string oldVer = "";
+                if (File.Exists(currentFile))
+                {
+                    try { oldVer = File.ReadAllText(currentFile, Encoding.UTF8).Trim(); }
+                    catch (Exception) { oldVer = ""; }
+                }
+                if (!string.IsNullOrEmpty(oldVer) && !string.Equals(oldVer, version, StringComparison.OrdinalIgnoreCase))
+                {
+                    WriteTextAtomic(prevFile, oldVer);
+                }
+                WriteTextAtomic(currentFile, version);
+
+                PruneOldHotDirs(hotRoot, version, oldVer);
+
+                return new Dictionary<string, object> {
+                    { "version", version },
+                    { "dir", targetDir },
+                    { "reloading", true },
+                    { "note", "热更新已就绪，正在重载面板（无需重启 Illustrator）。" }
+                };
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(staging) && Directory.Exists(staging))
+                    SafeDeleteDir(staging);
+            }
         }
 
         public static Dictionary<string, object> Install(string file, string aipPath, string hostExe, int parentPid)
@@ -135,12 +296,12 @@ namespace ZiXing
             text.AppendLine("Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue");
             File.WriteAllText(script, text.ToString(), new UTF8Encoding(true));
 
-            System.Diagnostics.ProcessStartInfo info = new System.Diagnostics.ProcessStartInfo();
+            ProcessStartInfo info = new ProcessStartInfo();
             info.FileName = "powershell.exe";
             info.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + script + "\"";
             info.UseShellExecute = false;
             info.CreateNoWindow = true;
-            System.Diagnostics.Process.Start(info);
+            Process.Start(info);
 
             return new Dictionary<string, object> {
                 { "script", script },
@@ -148,6 +309,98 @@ namespace ZiXing
                 { "aip", aipPath },
                 { "note", "退出 Illustrator 后会自动替换并重新打开。" }
             };
+        }
+
+        // ---- 热更新目录辅助 ----
+
+        static void CopyMissingRuntimeDlls(string sourceDir, string targetDir)
+        {
+            if (string.IsNullOrEmpty(sourceDir) || !Directory.Exists(sourceDir)) return;
+            foreach (string dll in Directory.GetFiles(sourceDir, "*.dll"))
+            {
+                string name = Path.GetFileName(dll);
+                if (string.Equals(name, "YunLiNative.dll", StringComparison.OrdinalIgnoreCase)) continue;
+                string dest = Path.Combine(targetDir, name);
+                if (!File.Exists(dest))
+                {
+                    try { File.Copy(dll, dest, false); }
+                    catch (Exception) { }
+                }
+            }
+        }
+
+        static void LinkOrCopyDirectory(string sourceDir, string destDir)
+        {
+            try
+            {
+                ProcessStartInfo psi = new ProcessStartInfo();
+                psi.FileName = "cmd.exe";
+                psi.Arguments = "/c mklink /J \"" + destDir + "\" \"" + sourceDir + "\"";
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                psi.WindowStyle = ProcessWindowStyle.Hidden;
+                using (Process p = Process.Start(psi))
+                {
+                    p.WaitForExit(5000);
+                    if (p.ExitCode == 0 && Directory.Exists(destDir)) return;
+                }
+            }
+            catch (Exception) { }
+            CopyDirectoryRecursive(sourceDir, destDir);
+        }
+
+        static void CopyDirectoryRecursive(string src, string dst)
+        {
+            Directory.CreateDirectory(dst);
+            foreach (string file in Directory.GetFiles(src))
+                File.Copy(file, Path.Combine(dst, Path.GetFileName(file)), true);
+            foreach (string sub in Directory.GetDirectories(src))
+                CopyDirectoryRecursive(sub, Path.Combine(dst, Path.GetFileName(sub)));
+        }
+
+        static void WriteTextAtomic(string path, string content)
+        {
+            string tmp = path + ".tmp";
+            File.WriteAllText(tmp, content, new UTF8Encoding(false));
+            if (File.Exists(path)) File.Delete(path);
+            File.Move(tmp, path);
+        }
+
+        static void SafeDeleteDir(string dir)
+        {
+            try
+            {
+                if (!Directory.Exists(dir)) return;
+                // 先卸载内部 junction，防止递归删除误触基线目录
+                string ocrLink = Path.Combine(dir, "assets", "web", "font", "ocr");
+                if (Directory.Exists(ocrLink))
+                {
+                    FileAttributes attr = File.GetAttributes(ocrLink);
+                    if ((attr & FileAttributes.ReparsePoint) != 0)
+                        Directory.Delete(ocrLink, false);
+                }
+                Directory.Delete(dir, true);
+            }
+            catch (Exception) { }
+        }
+
+        static void PruneOldHotDirs(string hotRoot, string keep1, string keep2)
+        {
+            try
+            {
+                string currentBase = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                foreach (string sub in Directory.GetDirectories(hotRoot))
+                {
+                    string name = Path.GetFileName(sub);
+                    if (string.Equals(name, keep1, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.IsNullOrEmpty(keep2) && string.Equals(name, keep2, StringComparison.OrdinalIgnoreCase)) continue;
+                    string full = Path.GetFullPath(sub).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (string.Equals(full, currentBase, StringComparison.OrdinalIgnoreCase)) continue;
+                    SafeDeleteDir(sub);
+                }
+            }
+            catch (Exception) { }
         }
 
         // ---- 更新源 ----
@@ -166,10 +419,18 @@ namespace ZiXing
             };
         }
 
-        static string[] AssetSources(string tag, string asset, string explicitUrl)
+        static string[] AssetSources(string tag, string asset, string explicitUrl, bool isHot)
         {
-            string custom = Environment.GetEnvironmentVariable("YUNLI_UPDATE_ASSET");
-            if (!string.IsNullOrEmpty(custom)) return new string[] { custom };
+            if (isHot)
+            {
+                string customHot = Environment.GetEnvironmentVariable("YUNLI_UPDATE_HOT_ASSET");
+                if (!string.IsNullOrEmpty(customHot)) return new string[] { customHot };
+            }
+            else
+            {
+                string custom = Environment.GetEnvironmentVariable("YUNLI_UPDATE_ASSET");
+                if (!string.IsNullOrEmpty(custom)) return new string[] { custom };
+            }
             if (!string.IsNullOrEmpty(explicitUrl)) return new string[] { explicitUrl };
             string gh = "https://github.com/" + Repo + "/releases/download/" + tag + "/" + asset;
             return new string[] {
@@ -290,7 +551,7 @@ namespace ZiXing
                     if (read <= 0) break;
                     target.Write(buffer, 0, read);
                     received += read;
-                    if (progress != null && (received - reported >= 262144 || received == total))
+                    if (progress != null && (received - reported >= 131072 || received == total))
                     {
                         reported = received;
                         progress(received, total);

@@ -8,6 +8,8 @@
     export:'<path d="M12 3v12m-4-4 4 4 4-4M4 15v5h16v-5"/>',
     fonts:'<path d="M4 20 10 4h4l6 16M7 13h10"/>',
     pdf:'<path d="M7 3h7l5 5v13H7Z"/><path d="M14 3v5h5M9 17c1-2 5-2 6 0"/>',
+    split:'<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18M3 12h18"/>',
+    spotselect:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2"/>',
     check:'<path d="M9 12l2 2 4-4M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/>',
     barcode:'<path d="M3 5v14m4-14v14m3-14v14m4-14v14m3-14v14m4-14v14"/>',
     arrow:'<path d="m9 5 7 7-7 7"/>',
@@ -38,6 +40,8 @@
     ] },
     { id:"design", title:"设计处理", items:[
       { id:"fonts", title:"字体与文字", desc:"转曲恢复、文字提取与合并拆分", view:"fonts" },
+      { id:"split", title:"图片分切", desc:"按矩形刀线无损分割嵌入位图", view:"split" },
+      { id:"spotselect", title:"专色选择", desc:"按专色百分比选择等于、大于或小于的对象", view:"spotselect" },
       { id:"barcode", title:"条码生成", desc:"创建印刷条码", disabled:true }
     ] }
   ] };

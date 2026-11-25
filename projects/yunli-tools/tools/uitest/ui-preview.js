@@ -9,7 +9,7 @@
   ];
   function reply(message, data, error) {
     var encoded = btoa(unescape(encodeURIComponent(JSON.stringify({ id: message.id, ok: !error, data: data, error: error }))));
-    window.__zixingDeliver(encoded);
+    window.__yunliDeliver(encoded);
   }
   function host(payload) {
     switch (payload.action) {
@@ -57,11 +57,27 @@
       }
       if (action === "export") document.documentElement.setAttribute("data-ui-export", JSON.stringify(message.payload.payload));
       if (action === "marks" || action === "export") return reply(message, { done: true });
+      if (action === "splitInspect") return reply(message, {
+        rasterCount: 1, rectCount: 50, placedCount: 0, overlapCount: 50,
+        width: 4800, height: 3600, bitsPerPixel: 16, hasAlpha: true, dpiX: 600, dpiY: 600,
+        colorSpace: "灰度(带透明)", spot: "烫金", tint: 100
+      });
+      if (action === "splitRun") return reply(message, {
+        count: 50, skipped: 0, width: 4800, height: 3600, dpi: 600,
+        applyMask: !!(message.payload.payload && message.payload.payload.applyMask),
+        elapsedMs: 120, layer: "图片分切_烫金", spot: "烫金", colorSpace: "灰度(带透明)"
+      });
+      if (action === "spotSelectInspect") return reply(message, {
+        spots: ["烫金", "白墨", "PANTONE 1205 C"], selection: 1,
+        sample: { spot: "烫金", percent: 50, where: "fill" }
+      });
+      if (action === "spotSelectRun") {
+        var p = message.payload.payload || {};
+        return reply(message, { matched: 12, spot: p.spot || "烫金", mode: p.mode || "eq", percent: p.percent });
+      }
       throw Error("UI 模拟桥不支持 tool 操作：" + action);
     }
     if (message.method === "host") return reply(message, host(message.payload));
-    if (message.method === "license") return reply(message, { state: "full", code: "UI-preview" });
-    if (message.method === "update") return reply(message, { newer: false });
     if (message.method === "cleanup") return reply(message, {});
     if (message.method === "ocr") return reply(message, {
       native: true, width: 400, height: 200,

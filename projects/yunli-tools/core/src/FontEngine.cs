@@ -16,7 +16,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-namespace ZiXing
+namespace YunLi.Core
 {
 	public sealed class FontMatcher
 	{
@@ -1717,9 +1717,9 @@ namespace ZiXing
 				string text = Json.Encode(action);
 				string text2 = Json.Encode(Uri.EscapeDataString(Json.Encode(payload)));
 				string text3 = Json.Encode(hostExecutable);
-				// 自有常驻引擎,与字醒(zixing-windows)彻底隔离;标记跟随核心版本,改宿主脚本后自动重新注入。
+				// 自有常驻引擎;标记跟随核心版本,改宿主脚本后自动重新注入。
 				// ExtendScript 不允许引擎脚本顶层 return(Error 30),哨兵必须用 throw。
-				string script = "#targetengine \"yunli-font\"\n" + guard + "\nZiXingCheckHost(" + major + "," + text3 + ");\nif(typeof YunLiFontBuild==='undefined'||YunLiFontBuild!=='" + YunLi.Core.Program.Version + "'){\n" + source + "\nvar YunLiFontBuild='" + YunLi.Core.Program.Version + "';}\nif(typeof TextRevive==='undefined'){throw new Error(\"字体桥未注入：yunli-font 引擎初始化失败，请重启 Illustrator\");}\nTextRevive.dispatch(" + text + "," + text2 + ");";
+				string script = "#targetengine \"yunli-font\"\n" + guard + "\nYunLiCheckHost(" + major + "," + text3 + ");\nif(typeof YunLiFontBuild==='undefined'||YunLiFontBuild!=='" + Program.Version + "'){\n" + source + "\nvar YunLiFontBuild='" + Program.Version + "';}\nif(typeof TextRevive==='undefined'){throw new Error(\"字体桥未注入：yunli-font 引擎初始化失败，请重启 Illustrator\");}\nTextRevive.dispatch(" + text + "," + text2 + ");";
 				return RunInIllustrator(script);
 			}
 
@@ -1730,7 +1730,7 @@ namespace ZiXing
 				string toolsBuild;
 				using (var hash = System.Security.Cryptography.SHA256.Create())
 					toolsBuild = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(tools))).Replace("-", "");
-				string script = "#targetengine \"yunli-tools\"\n" + guard + "\nZiXingCheckHost(" + major + "," + Json.Encode(hostExecutable) + ");\nvar YUNLI_HOST_DIR = " + Json.Encode(toolsDir) + ";\nif(typeof YunLiToolsBuild==='undefined'||YunLiToolsBuild!=='" + toolsBuild + "'){$.evalFile(new File(YUNLI_HOST_DIR+'/json2.jsx'));}\nif(typeof YunLiToolsBuild==='undefined'||YunLiToolsBuild!=='" + toolsBuild + "'){\n" + tools + "\nvar YunLiToolsBuild='" + toolsBuild + "';}\nif(typeof YunLiTools==='undefined'){throw new Error(\"工具桥未注入\");}\nYunLiTools.dispatch(" + Json.Encode(action) + "," + Json.Encode(Uri.EscapeDataString(Json.Encode(payload ?? new Dictionary<string, object>()))) + ");";
+				string script = "#targetengine \"yunli-tools\"\n" + guard + "\nYunLiCheckHost(" + major + "," + Json.Encode(hostExecutable) + ");\nvar YUNLI_HOST_DIR = " + Json.Encode(toolsDir) + ";\nif(typeof YunLiToolsBuild==='undefined'||YunLiToolsBuild!=='" + toolsBuild + "'){$.evalFile(new File(YUNLI_HOST_DIR+'/json2.jsx'));}\nif(typeof YunLiToolsBuild==='undefined'||YunLiToolsBuild!=='" + toolsBuild + "'){\n" + tools + "\nvar YunLiToolsBuild='" + toolsBuild + "';}\nif(typeof YunLiTools==='undefined'){throw new Error(\"工具桥未注入\");}\nYunLiTools.dispatch(" + Json.Encode(action) + "," + Json.Encode(Uri.EscapeDataString(Json.Encode(payload ?? new Dictionary<string, object>()))) + ");";
 				return RunInIllustrator(script);
 			}
 

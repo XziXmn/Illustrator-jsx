@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace ZiXing
+namespace YunLi.Core
 {
     // PDF 转曲：先丢掉 Illustrator 私有数据（预览层已是曲线/嵌图的文件），
     // 内容流里仍有活字且字形已嵌入时，再用随工具附带的 Ghostscript 按字形转成曲线。
@@ -514,10 +514,19 @@ namespace ZiXing
             }
         }
 
+        static string BaselineAssets()
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "YunLi", "assets");
+        }
+
         static string FindQpdf(string assets)
         {
             string bundled = Path.Combine(assets ?? "", "tools", "qpdf", "qpdf.exe");
-            return File.Exists(bundled) ? bundled : null;
+            if (File.Exists(bundled)) return bundled;
+            string baseline = Path.Combine(BaselineAssets(), "tools", "qpdf", "qpdf.exe");
+            return File.Exists(baseline) ? baseline : null;
         }
 
         static string FindGhostscript(string assets)
@@ -526,6 +535,8 @@ namespace ZiXing
             if (!string.IsNullOrEmpty(env) && File.Exists(env)) return env;
             string bundled = Path.Combine(assets ?? "", "tools", "gs", "bin", "gswin64c.exe");
             if (File.Exists(bundled)) return bundled;
+            string baseline = Path.Combine(BaselineAssets(), "tools", "gs", "bin", "gswin64c.exe");
+            if (File.Exists(baseline)) return baseline;
             string gsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "gs");
             if (Directory.Exists(gsRoot))
             {

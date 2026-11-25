@@ -7,6 +7,7 @@
     YunLiRenderNav();
     if (name === "fonts") YunLiFonts.enter();
     if (window.YunLiPages) YunLiPages.enter(name);
+    if (window.YunLiSpotTools) YunLiSpotTools.enter(name);
   }
   YunLiUI.mountCatalog(document.getElementById("home-groups"), "搜索首页工具", false);
   window.addEventListener("hashchange", showRoute);

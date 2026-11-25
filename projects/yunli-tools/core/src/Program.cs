@@ -21,6 +21,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,15 +33,47 @@ namespace YunLi.Core
 {
     internal static class Program
     {
-        public const string Version = "0.3.3";
+        public const string Version = "0.4.0";
 
         internal static string AipPath;
         internal static string HostPath;
         internal static int HostPid;
+        internal static IntPtr IpcHwnd;
+        internal static int ShellVersion = 1;
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+        [DllImport("shcore.dll")]
+        private static extern int SetProcessDpiAwareness(int awareness);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetProcessDPIAware();
+
+        // 与 Illustrator.exe 对齐为 Per-Monitor V2 DPI 感知，
+        // 避免 Windows 把核心进程当成 DPI Unaware 导致嵌入面板右/底边被裁剪。
+        private static void EnableDpiAwareness()
+        {
+            try
+            {
+                if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return;
+            }
+            catch (Exception) { }
+            try
+            {
+                if (SetProcessDpiAwareness(2) == 0) return;
+            }
+            catch (Exception) { }
+            try { SetProcessDPIAware(); }
+            catch (Exception) { }
+        }
 
         [STAThread]
         private static int Main(string[] args)
         {
+            EnableDpiAwareness();
             Log("start " + string.Join(" ", args));
             try
             {
@@ -70,6 +103,18 @@ namespace YunLi.Core
                     aipDir = args[i + 1];
                 if (args[i] == "--aip")
                     AipPath = args[i + 1];
+                if (args[i] == "--ipc")
+                {
+                    long rawHwnd;
+                    if (long.TryParse(args[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out rawHwnd) && rawHwnd != 0)
+                        IpcHwnd = new IntPtr(rawHwnd);
+                }
+                if (args[i] == "--shell-ver")
+                {
+                    int sv;
+                    if (int.TryParse(args[i + 1], out sv) && sv > 0)
+                        ShellVersion = sv;
+                }
             }
             HostPath = hostExe;
             HostPid = parentPid;
@@ -87,9 +132,9 @@ namespace YunLi.Core
                 bool vertical = args.Length > testIdx + 2 && args[testIdx + 2] == "vertical";
                 try
                 {
-                    object result = ZiXing.OcrEngine.Recognize(image, ResolveAssets(), "zh", vertical);
+                    object result = OcrEngine.Recognize(image, ResolveAssets(), "zh", vertical);
                     if (selfAi >= 0) result = AiRescueSelftest(image, result);
-                    File.WriteAllText(outPath, ZiXing.Json.Encode(result), new UTF8Encoding(false));
+                    File.WriteAllText(outPath, Json.Encode(result), new UTF8Encoding(false));
                     Log("selftest-ok " + outPath);
                 }
                 catch (Exception ex)
@@ -109,6 +154,25 @@ namespace YunLi.Core
                 Log("assets-selftest " + watch.ElapsedMilliseconds + "ms " + assetsPath);
                 return 0;
             }
+            int updateTest = Array.IndexOf(args, "--selftest-update");
+            if (updateTest >= 0 && updateTest + 2 < args.Length)
+            {
+                string outFile = args[updateTest + 1];
+                string simCurrent = args[updateTest + 2];
+                int simShell = ShellVersion;
+                bool simIpc = args.Length > updateTest + 3 && args[updateTest + 3] == "ipc";
+                try
+                {
+                    object result = Update.Check(simCurrent, simShell, simIpc);
+                    File.WriteAllText(outFile, Json.Encode(result), new UTF8Encoding(false));
+                }
+                catch (Exception ex)
+                {
+                    File.WriteAllText(outFile, "{\"error\":\"" +
+                        ex.Message.Replace("\\", "\\\\").Replace("\"", "'") + "\"}", new UTF8Encoding(false));
+                }
+                return 0;
+            }
             int pdfTest = Array.IndexOf(args, "--selftest-pdf");
             if (pdfTest >= 0 && pdfTest + 2 < args.Length)
             {
@@ -117,8 +181,8 @@ namespace YunLi.Core
                 string curvePath = Path.Combine(folder, Path.GetFileName(pdf) + ".curve.json");
                 try
                 {
-                    object result = ZiXing.PdfCurve.Convert(pdf, folder, ResolveAssets());
-                    File.WriteAllText(curvePath, ZiXing.Json.Encode(result), new UTF8Encoding(false));
+                    object result = PdfCurve.Convert(pdf, folder, ResolveAssets());
+                    File.WriteAllText(curvePath, Json.Encode(result), new UTF8Encoding(false));
                     Log("pdf-selftest-ok " + curvePath);
                 }
                 catch (Exception ex)
@@ -151,21 +215,36 @@ namespace YunLi.Core
             bool createdNew;
             using (Mutex mutex = new Mutex(true, mutexName, out createdNew))
             {
-                if (!createdNew)
+                bool acquired = createdNew;
+                if (!acquired)
+                {
+                    // 热重载瞬间旧核心可能尚未完全释放句柄，短暂等待 2.5 秒再判定多开。
+                    try { acquired = mutex.WaitOne(2500, false); }
+                    catch (AbandonedMutexException) { acquired = true; }
+                }
+                if (!acquired)
                 {
                     Log("already-running");
                     return 0;
                 }
-                string assets = ResolveAssets();
-                StartAiPackExtract(aipDir, standalone);
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                using (PanelForm form = new PanelForm(assets, standalone, hostExe, parentPid))
+                try
                 {
-                    Application.Run(form);
+                    string assets = ResolveAssets();
+                    StartAiPackExtract(aipDir, standalone);
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    using (PanelForm form = new PanelForm(assets, standalone, hostExe, parentPid))
+                    {
+                        Application.Run(form);
+                    }
+                    Log("exit");
+                    return 0;
                 }
-                Log("exit");
-                return 0;
+                finally
+                {
+                    try { mutex.ReleaseMutex(); }
+                    catch (Exception) { }
+                }
             }
         }
 
@@ -338,13 +417,13 @@ namespace YunLi.Core
                 Dictionary<string, object> line = (Dictionary<string, object>)lineObj;
                 line["confidence"] = 0.0;   // 自测:全部行强制走 AI 复识
             }
-            Log("selftest-ai probe=" + ZiXing.AiEngine.Probe());
+            Log("selftest-ai probe=" + AiEngine.Probe());
             return AiRescueStatic(image, data, 0.5);
         }
 
         internal static object AiRescueStatic(string image, Dictionary<string, object> data, double threshold)
         {
-            if (!ZiXing.AiEngine.Probe()) return data;
+            if (!AiEngine.Probe()) return data;
             List<object> lines = (List<object>)data["lines"];
             if (lines == null || lines.Count == 0) return data;
             int width = Convert.ToInt32(Convert.ToDouble(data["width"], CultureInfo.InvariantCulture));
@@ -364,7 +443,7 @@ namespace YunLi.Core
                         (int)Math.Ceiling(Convert.ToDouble(line["height"], CultureInfo.InvariantCulture) * height));
                     long elapsed;
                     string paddle = (string)line["text"];
-                    string ai = ZiXing.AiEngine.RecognizeCrop(bitmap, crop, out elapsed);
+                    string ai = AiEngine.RecognizeCrop(bitmap, crop, out elapsed);
                     calls++;
                     if (string.IsNullOrEmpty(ai) || ai == paddle) continue;
                     line["text"] = ai;
@@ -392,8 +471,8 @@ namespace YunLi.Core
         private readonly string hostExe;
         private readonly int parentPid;
         private WebView2 webView;
-        private ZiXing.HostBridge bridge;
-        private ZiXing.FontMatcher matcher;
+        private HostBridge bridge;
+        private FontMatcher matcher;
         private readonly Dictionary<string, string> works = new Dictionary<string, string>();
         private bool fontBusy;
 
@@ -404,6 +483,7 @@ namespace YunLi.Core
             hostExe = hostPath;
             parentPid = parent;
             Text = "YunLiPanel";
+            AutoScaleMode = AutoScaleMode.None;
             StartPosition = FormStartPosition.CenterScreen;
             Size = new System.Drawing.Size(360, 560);
             BackColor = System.Drawing.Color.White;
@@ -429,8 +509,20 @@ namespace YunLi.Core
             Load += new EventHandler(OnFormLoad);
             FormClosed += new FormClosedEventHandler(delegate(object s, FormClosedEventArgs e2)
             {
-                ZiXing.AiEngine.Shutdown();   // 兜底档子进程随核心退出
+                AiEngine.Shutdown();   // 兜底档子进程随核心退出
             });
+        }
+
+        private const int WM_YUNLI_SEL_CHANGED = 0x8000 + 10; /* WM_APP + 10 */
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_YUNLI_SEL_CHANGED)
+            {
+                Deliver(new Dictionary<string, object> { { "eventType", "selectionChanged" } });
+                return;
+            }
+            base.WndProc(ref m);
         }
 
         private void OnFormLoad(object sender, EventArgs e)
@@ -554,8 +646,8 @@ namespace YunLi.Core
 
         private void Deliver(object body)
         {
-            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(ZiXing.Json.Encode(body)));
-            string script = "window.__zixingDeliver&&window.__zixingDeliver('" + encoded + "')";
+            string encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(Json.Encode(body)));
+            string script = "window.__yunliDeliver&&window.__yunliDeliver('" + encoded + "')";
             Action run = delegate
             {
                 try
@@ -569,20 +661,20 @@ namespace YunLi.Core
             else run();
         }
 
-        private ZiXing.HostBridge Bridge()
+        private HostBridge Bridge()
         {
             if (bridge == null)
             {
                 if (string.IsNullOrEmpty(hostExe))
                     throw new Exception("请从 Illustrator 的「窗口 → YunLi工具箱」打开。");
-                bridge = new ZiXing.HostBridge(assets, hostExe, parentPid);
+                bridge = new HostBridge(assets, hostExe, parentPid);
             }
             return bridge;
         }
 
         private void HandleFontMessage(string json)
         {
-            Dictionary<string, object> msg = ZiXing.Json.Object(json);
+            Dictionary<string, object> msg = Json.Object(json);
             object idObj;
             msg.TryGetValue("id", out idObj);
             string id = idObj as string;
@@ -593,25 +685,9 @@ namespace YunLi.Core
             Dictionary<string, object> payload = (msg.TryGetValue("payload", out payloadObj) && payloadObj is Dictionary<string, object>)
                 ? (Dictionary<string, object>)payloadObj
                 : new Dictionary<string, object>();
-            string session = ZiXing.Json.String(payload, "session") == "overlay" ? "overlay" : "restore";
+            string session = Json.String(payload, "session") == "overlay" ? "overlay" : "restore";
             try
             {
-                if (method == "license")
-                {
-                    Deliver(new Dictionary<string, object> {
-                        { "id", id }, { "ok", true },
-                        { "data", new Dictionary<string, object> { { "state", "full" }, { "code", "YunLi" } } }
-                    });
-                    return;
-                }
-                if (method == "shop" || method == "website" || method == "update")
-                {
-                    Deliver(new Dictionary<string, object> {
-                        { "id", id }, { "ok", true },
-                        { "data", new Dictionary<string, object> { { "newer", false }, { "opened", false } } }
-                    });
-                    return;
-                }
                 if (method == "cleanup")
                 {
                     CleanWorks(payload.ContainsKey("all") && object.Equals(payload["all"], true) ? null : session);
@@ -620,7 +696,7 @@ namespace YunLi.Core
                 }
                 if (method == "tool")
                 {
-                    string toolAction = ZiXing.Json.String(payload, "action");
+                    string toolAction = Json.String(payload, "action");
                     Program.Log("tool " + toolAction);
                     object toolInnerObj;
                     Dictionary<string, object> toolInner = (payload.TryGetValue("payload", out toolInnerObj) && toolInnerObj is Dictionary<string, object>)
@@ -628,7 +704,7 @@ namespace YunLi.Core
                         : new Dictionary<string, object>();
                     if (toolAction == "updateCheck")
                     {
-                        Task.Run(delegate { return (object)ZiXing.Update.Check(Program.Version); })
+                        Task.Run(delegate { return (object)YunLi.Core.Update.Check(Program.Version, Program.ShellVersion, NativeShellBridge.Available); })
                             .ContinueWith(delegate(Task<object> task)
                             {
                                 if (task.IsFaulted)
@@ -641,24 +717,27 @@ namespace YunLi.Core
                             });
                         return;
                     }
-                    if (toolAction == "updateDownload")
+                    if (toolAction == "updateDownload" || toolAction == "updateDownloadHot")
                     {
-                        string version = ZiXing.Json.String(toolInner, "version");
-                        string tag = ZiXing.Json.String(toolInner, "tag");
-                        string asset = ZiXing.Json.String(toolInner, "asset");
-                        string sha256 = ZiXing.Json.String(toolInner, "sha256");
-                        string url = ZiXing.Json.String(toolInner, "url");
+                        bool isHot = toolAction == "updateDownloadHot";
+                        string version = Json.String(toolInner, "version");
+                        string tag = Json.String(toolInner, "tag");
+                        string asset = Json.String(toolInner, "asset");
+                        string sha256 = Json.String(toolInner, "sha256");
+                        string url = Json.String(toolInner, "url");
                         string messageId = id;
                         Task.Run(delegate
                         {
-                            return (object)ZiXing.Update.Download(version, tag, asset, sha256, url,
-                                delegate(long received, long total)
-                                {
-                                    Deliver(new Dictionary<string, object> {
-                                        { "id", messageId }, { "eventType", "progress" },
-                                        { "data", new Dictionary<string, object> { { "received", received }, { "total", total } } }
-                                    });
+                            Action<long, long> onProg = delegate(long received, long total)
+                            {
+                                Deliver(new Dictionary<string, object> {
+                                    { "id", messageId }, { "eventType", "progress" },
+                                    { "data", new Dictionary<string, object> { { "received", received }, { "total", total } } }
                                 });
+                            };
+                            return isHot
+                                ? (object)YunLi.Core.Update.DownloadHot(version, tag, asset, sha256, url, onProg)
+                                : (object)YunLi.Core.Update.Download(version, tag, asset, sha256, url, onProg);
                         }).ContinueWith(delegate(Task<object> task)
                         {
                             if (task.IsFaulted)
@@ -669,18 +748,43 @@ namespace YunLi.Core
                             }
                             else
                             {
-                                Program.Log("update-download-ok");
+                                Program.Log(isHot ? "update-hot-download-ok" : "update-download-ok");
                                 Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                            }
+                        });
+                        return;
+                    }
+                    if (toolAction == "updateHotInstall")
+                    {
+                        string file = Json.String(toolInner, "file");
+                        string version = Json.String(toolInner, "version");
+                        string assetsDir = assets;
+                        Task.Run(delegate
+                        {
+                            return (object)YunLi.Core.Update.InstallHot(file, version, assetsDir);
+                        }).ContinueWith(delegate(Task<object> task)
+                        {
+                            if (task.IsFaulted)
+                            {
+                                string err = task.Exception.GetBaseException().Message;
+                                Program.Log("update-hot-install-error " + err);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", false }, { "error", err } });
+                            }
+                            else
+                            {
+                                Program.Log("update-hot-install-ok " + version);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                                ScheduleHotReload();
                             }
                         });
                         return;
                     }
                     if (toolAction == "updateInstall")
                     {
-                        string file = ZiXing.Json.String(toolInner, "file");
+                        string file = Json.String(toolInner, "file");
                         Deliver(new Dictionary<string, object> {
                             { "id", id }, { "ok", true },
-                            { "data", ZiXing.Update.Install(file, Program.AipPath, Program.HostPath, Program.HostPid) }
+                            { "data", YunLi.Core.Update.Install(file, Program.AipPath, Program.HostPath, Program.HostPid) }
                         });
                         return;
                     }
@@ -709,9 +813,9 @@ namespace YunLi.Core
                     if (toolAction == "pdfOutline")
                     {
                         object[] files;
-                        try { files = ZiXing.Json.Array(toolInner, "files"); }
+                        try { files = Json.Array(toolInner, "files"); }
                         catch (Exception) { files = new object[0]; }
-                        string folder = ZiXing.Json.String(toolInner, "folder");
+                        string folder = Json.String(toolInner, "folder");
                         string assetsDir = assets;
                         Task.Run(delegate
                         {
@@ -725,7 +829,7 @@ namespace YunLi.Core
                                 });
                                 try
                                 {
-                                    results.Add(ZiXing.PdfCurve.Convert(file, folder, assetsDir));
+                                    results.Add(PdfCurve.Convert(file, folder, assetsDir));
                                 }
                                 catch (Exception ex)
                                 {
@@ -772,6 +876,41 @@ namespace YunLi.Core
                         });
                         return;
                     }
+                    if (toolAction == "splitInspect" || toolAction == "splitRun"
+                        || toolAction == "spotSelectInspect" || toolAction == "spotSelectRun")
+                    {
+                        bool needNativeOnly = (toolAction == "splitInspect" || toolAction == "splitRun");
+                        Task<object> nativeOrFallback;
+                        if (NativeShellBridge.Available)
+                        {
+                            nativeOrFallback = NativeShellBridge.Execute(toolAction, toolInner);
+                        }
+                        else if (needNativeOnly)
+                        {
+                            TaskCompletionSource<object> tcs = new TaskCompletionSource<object>();
+                            tcs.SetException(new Exception("未连接到新版插件的原生无损裁切接口，请重启 Illustrator 加载最新 YunLiTools.aip 后重试。"));
+                            nativeOrFallback = tcs.Task;
+                        }
+                        else
+                        {
+                            nativeOrFallback = Bridge().ExecuteTool(toolAction, toolInner);
+                        }
+                        nativeOrFallback.ContinueWith(delegate(Task<object> task)
+                        {
+                            if (task.IsFaulted)
+                            {
+                                string err = task.Exception.GetBaseException().Message;
+                                Program.Log("tool-error " + toolAction + " " + err);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", false }, { "error", err } });
+                            }
+                            else
+                            {
+                                Program.Log("tool-ok " + toolAction);
+                                Deliver(new Dictionary<string, object> { { "id", id }, { "ok", true }, { "data", task.Result } });
+                            }
+                        });
+                        return;
+                    }
                     Task<object> toolTask = toolAction == "preview" ? CreateToolPreview(toolInner) : Bridge().ExecuteTool(toolAction, toolInner);
                     toolTask.ContinueWith(delegate(Task<object> task)
                     {
@@ -792,7 +931,7 @@ namespace YunLi.Core
                 if (method == "ocr")
                 {
                     // 识别档位路由:C# server 模型(横竖排)→ 低置信行 Qwen 复识;不可用则交还页面走 wasm 降档
-                    if (!ZiXing.OcrEngine.Available(assets))
+                    if (!OcrEngine.Available(assets))
                     {
                         Deliver(new Dictionary<string, object> {
                             { "id", id }, { "ok", true },
@@ -804,13 +943,13 @@ namespace YunLi.Core
                     if (!works.TryGetValue(session, out dir))
                         throw new Exception("识别记录已失效。");
                     string image = Path.Combine(dir, "selection.png");
-                    string lang = ZiXing.Json.String(payload, "language") ?? "zh";
+                    string lang = Json.String(payload, "language") ?? "zh";
                     bool vertical = payload.ContainsKey("vertical") && object.Equals(payload["vertical"], true);
                     bool forceAi = payload.ContainsKey("forceAi") && object.Equals(payload["forceAi"], true);
                     Task.Run(delegate
                     {
                         System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-                        object result = ZiXing.OcrEngine.Recognize(image, assets, lang, vertical);
+                        object result = OcrEngine.Recognize(image, assets, lang, vertical);
                         watch.Stop();
                         Program.Log("ocr-done " + watch.ElapsedMilliseconds + "ms vertical=" + (vertical ? "1" : "0"));
                         return AiRescueInstance(image, result, forceAi ? 0.0 : 0.85);
@@ -834,7 +973,7 @@ namespace YunLi.Core
                 }
                 if (method == "host")
                 {
-                    string action = ZiXing.Json.String(payload, "action");
+                    string action = Json.String(payload, "action");
                     Program.Log("host " + action);
                     object innerObj;
                     Dictionary<string, object> inner = (payload.TryGetValue("payload", out innerObj) && innerObj is Dictionary<string, object>)
@@ -883,7 +1022,7 @@ namespace YunLi.Core
                     if (!works.TryGetValue(session, out dir))
                         throw new Exception("识别记录已失效。");
                     string image = Path.Combine(dir, "selection.png");
-                    if (matcher == null) matcher = new ZiXing.FontMatcher(hostExe);
+                    if (matcher == null) matcher = new FontMatcher(hostExe);
                     Task.Run(delegate
                     {
                         return matcher.Match(image, payload, delegate(object data)
@@ -974,6 +1113,25 @@ namespace YunLi.Core
             return "{\"ok\":false,\"error\":\"unknown-action\"}";
         }
 
+        private void ScheduleHotReload()
+        {
+            Action trigger = delegate
+            {
+                System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+                timer.Interval = 220;
+                timer.Tick += delegate
+                {
+                    timer.Stop();
+                    timer.Dispose();
+                    NativeShellBridge.RequestReload();
+                    Application.Exit();
+                };
+                timer.Start();
+            };
+            if (InvokeRequired) BeginInvoke(trigger);
+            else trigger();
+        }
+
         private void ShowFallback(string reason)
         {
             foreach (Control c in Controls)
@@ -989,6 +1147,111 @@ namespace YunLi.Core
                     return;
                 }
             }
+        }
+    }
+
+    // =====================================================================
+    // 原生 C 壳 IPC 通道(WM_COPYDATA → YunLiTools.aip 主线程 HiddenWndProc)
+    // 用于像素级无损图片分切与高速专色百分比选择。
+    // =====================================================================
+    internal static class NativeShellBridge
+    {
+        private const uint WM_COPYDATA = 0x004A;
+        private const uint WM_YUNLI_RELOAD = 0x8000 + 11; /* WM_APP + 11 */
+        private const uint SMTO_ABORTIFHUNG = 0x0002;
+        private static readonly IntPtr Magic = new IntPtr(0x594C4950); /* 'YLIP' */
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct COPYDATASTRUCT
+        {
+            public IntPtr dwData;
+            public int cbData;
+            public IntPtr lpData;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr SendMessageTimeoutW(
+            IntPtr hWnd, uint msg, IntPtr wParam, ref COPYDATASTRUCT lParam,
+            uint flags, uint timeoutMs, out IntPtr result);
+
+        public static bool Available
+        {
+            get { return Program.IpcHwnd != IntPtr.Zero && IsWindow(Program.IpcHwnd); }
+        }
+
+        public static bool RequestReload()
+        {
+            if (!Available) return false;
+            return PostMessageW(Program.IpcHwnd, WM_YUNLI_RELOAD, IntPtr.Zero, IntPtr.Zero);
+        }
+
+        public static Task<object> Execute(string action, Dictionary<string, object> payload)
+        {
+            return Task.Run(delegate
+            {
+                if (!Available) throw new Exception("原生插件接口不可用，请重启 Illustrator。");
+                string dir = Path.Combine(Path.GetTempPath(), "yunli-ipc");
+                Directory.CreateDirectory(dir);
+                string token = Guid.NewGuid().ToString("N");
+                string reqPath = Path.Combine(dir, token + ".req.json");
+                string resPath = Path.Combine(dir, token + ".res.json");
+                try
+                {
+                    Dictionary<string, object> req = new Dictionary<string, object>();
+                    if (payload != null)
+                    {
+                        foreach (KeyValuePair<string, object> kv in payload) req[kv.Key] = kv.Value;
+                    }
+                    req["action"] = action;
+                    File.WriteAllText(reqPath, Json.Encode(req), new UTF8Encoding(false));
+
+                    string wire = reqPath + "|" + resPath;
+                    byte[] bytes = Encoding.Unicode.GetBytes(wire + "\0");
+                    IntPtr mem = Marshal.AllocHGlobal(bytes.Length);
+                    IntPtr msgResult;
+                    IntPtr ok;
+                    try
+                    {
+                        Marshal.Copy(bytes, 0, mem, bytes.Length);
+                        COPYDATASTRUCT cds = new COPYDATASTRUCT
+                        {
+                            dwData = Magic,
+                            cbData = bytes.Length,
+                            lpData = mem
+                        };
+                        ok = SendMessageTimeoutW(Program.IpcHwnd, WM_COPYDATA, IntPtr.Zero, ref cds,
+                            SMTO_ABORTIFHUNG, 120000, out msgResult);
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(mem);
+                    }
+
+                    if (ok == IntPtr.Zero || msgResult == IntPtr.Zero)
+                        throw new Exception("Illustrator 原生插件无响应，请确认没有未关闭的模态弹窗后重试。");
+                    if (!File.Exists(resPath))
+                        throw new Exception("原生插件未返回结果。");
+
+                    string raw = File.ReadAllText(resPath, Encoding.UTF8);
+                    Dictionary<string, object> dict = Json.Object(raw);
+                    if (!dict.ContainsKey("ok") || !(dict["ok"] is bool) || !(bool)dict["ok"])
+                        throw new Exception(Json.String(dict, "error") ?? "原生操作未完成。");
+                    return dict.ContainsKey("data") ? dict["data"] : (object)new Dictionary<string, object>();
+                }
+                finally
+                {
+                    try { if (File.Exists(reqPath)) File.Delete(reqPath); } catch (Exception) { }
+                    try { if (File.Exists(resPath)) File.Delete(resPath); } catch (Exception) { }
+                }
+            });
         }
     }
 }

@@ -67,8 +67,10 @@ main.page { flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; fle
 .zone h2,.section-title { margin:0 0 var(--item-gap); font-size:var(--text-heading); line-height:var(--line-heading); font-weight:var(--weight-strong); }
 .grid2 { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--row-gap) var(--item-gap); }
 .field { display:flex; flex-direction:column; gap:4px; min-width:0; font-size:var(--text-body); color:var(--muted); }
-input:not([type="checkbox"]):not([type="radio"]),select { width:100%; min-width:0; height:var(--control-height); padding:3px 8px; border:1px solid var(--control-line); border-radius:999px; color:var(--ink); background:var(--control-bg); font-size:var(--text-body); }
-select option { color:var(--ink); background:var(--page); }
+input:not([type="checkbox"]):not([type="radio"]),select { width:100%; min-width:0; height:var(--control-height); padding:3px 8px; border:1px solid var(--control-line); border-radius:999px; color:var(--ink); background-color:var(--control-bg); font-size:var(--text-body); }
+select { appearance:none; padding:3px 24px 3px 10px; cursor:pointer; text-overflow:ellipsis; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%237e8797' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 8px center; background-size:11px; }
+select:hover:not(:disabled) { border-color:var(--focus-edge); }
+select option { color:var(--ink); background:var(--popover); }
 input::placeholder { color:var(--muted); opacity:1; }
 .input-unit { display:flex; align-items:center; gap:6px; min-width:0; }
 .input-unit>span { flex:none; color:var(--muted); font-size:var(--text-caption); }
@@ -120,7 +122,7 @@ a.tool-entry:hover { background:var(--subtle); }
 .board label { min-width:0; }
 .board-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .board:has(input:checked) { grid-template-columns:40px minmax(0,1fr) 88px; }
-.board select { width:88px; justify-self:end; }
+.board select { width:88px; justify-self:end; padding:3px 18px 3px 7px; background-position:right 5px center; background-size:10px; }
 .board:has(input:not(:checked)) select { display:none; }
 .empty-state { margin:0; padding:12px 0; color:var(--muted); font-size:var(--text-body); }
 @media(min-width:600px) { .cols { grid-template-columns:repeat(2,minmax(0,1fr)); } }
@@ -149,7 +151,7 @@ a.tool-entry:hover { background:var(--subtle); }
 .mark-params .field { display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:4px; }
 .mark-params .input-unit { gap:3px; }
 .mark-params input { flex:none; width:var(--number-width); max-width:var(--number-width); padding-inline:5px; }
-.mark-params select { width:var(--number-width); max-width:var(--number-width); padding:3px 14px 3px 5px; appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m3 4.5 3 3 3-3' fill='none' stroke='%237e8797' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 3px center; background-size:10px; }
+.mark-params select { width:var(--number-width); max-width:var(--number-width); padding:3px 14px 3px 5px; background-position:right 3px center; background-size:10px; }
 .mark-pane .rule { margin:8px 0; }
 .subsection { margin-top:var(--item-gap); padding-top:var(--item-gap); border-top:1px solid var(--line); }
 .note-field { gap:4px; }
@@ -188,7 +190,7 @@ a.tool-entry:hover { background:var(--subtle); }
 .channel-settings { flex:none; font-size:var(--text-body); }
 .channel-settings .paramline { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; }
 .channel-settings .field { flex:none; flex-direction:row; align-items:center; gap:6px; white-space:nowrap; }
-.channel-settings select { flex:none; padding-inline:6px; }
+.channel-settings select { flex:none; padding:3px 18px 3px 7px; background-position:right 5px center; background-size:10px; }
 .channel-settings select[data-id="aa"] { width:92px; }
 .channel-settings select[data-id="ppi"] { width:60px; }
 .channel-settings .check { align-items:center; }
@@ -206,3 +208,17 @@ a.tool-entry:hover { background:var(--subtle); }
 #view-home .update-state { margin:0; text-align:center; }
 .update-state.ok { color:var(--ink); }
 .update-state.err { color:var(--danger); }
+
+/* 图片分切与专色选择 */
+#view-split,#view-spotselect { --workspace-max:480px; }
+.spot-sheet { width:100%; max-width:var(--workspace-max); margin-inline:auto; }
+.split-meta { margin:0; font-size:var(--text-caption); line-height:var(--line-caption); overflow-wrap:anywhere; }
+.spot-checks { margin-top:var(--item-gap); }
+.spot-target-row { display:flex; align-items:flex-end; gap:var(--item-gap); margin-bottom:var(--item-gap); }
+.spot-select-field { flex:1; min-width:0; }
+.spot-target-row > button { flex:none; padding-inline:10px; }
+.spot-cond-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--row-gap) var(--section-gap); }
+.inline-field { flex:none; flex-direction:row; align-items:center; gap:var(--control-gap); white-space:nowrap; }
+.inline-field input[inputmode] { flex:none; width:var(--number-width); max-width:var(--number-width); padding-inline:5px; }
+#ss-mode { flex:none; width:108px; padding:3px 22px 3px 9px; background-position:right 7px center; }
+.spot-scope-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--row-gap) var(--section-gap); }

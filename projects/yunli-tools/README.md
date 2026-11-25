@@ -1,22 +1,21 @@
 ﻿# YunLi工具箱
 
-自研 Illustrator 插件平台(阶段1:壳 + 核心 + 面板链路已通)。
-架构对齐参考插件「字醒」:`.aip` 壳(菜单/停靠/进程管理)+ 独立 .NET 核心进程
-(WinForms + WebView2 面板)。参考资料见 `../../references/字醒/`,
-SDK 头文件在 `../../references/SDK/`。
+自研 Illustrator 插件平台：`.aip` 原生壳（菜单/停靠/选区监听/热重载）+ 独立 .NET 核心进程（WinForms + WebView2 面板）+ 可热插拔 `YunLiNative.dll` 原生 SDK 工具模块。
 
 ## 目录
 
 ```
-shell/    C++ 壳 → YunLiTools.aip(MinGW gcc 编译)
-  src/main.c        PluginMain 消息分发、套件获取、菜单、面板停靠、载荷启动
-  src/plugin.def    导出 PluginMain
-  rc/resource.rc    PIPL 资源(官方 create_pipl.py 生成)+ 发布期载荷嵌入
-  rc/plugin.pipl    构建时自动生成
+shell/    C 壳与原生模块 → YunLiTools.aip + YunLiNative.dll (MinGW gcc 编译)
+  src/main.c           PluginMain 消息分发、套件获取、菜单、面板停靠、热重载
+  src/native_tools.c   原生无损图片分切与专色百分比选区 (YunLiNative.dll)
+  src/plugin.def       导出 PluginMain
+  src/native_tools.def 导出 YunLiNativeInit/Shutdown/HandleCopyData
+  rc/resource.rc       PIPL 资源(官方 create_pipl.py 生成)+ 发布期载荷嵌入
+  rc/plugin.pipl       构建时自动生成
 core/     C# 核心 → YunLiCore.exe(.NET FW 4.8 WinForms,内置 csc 编译)
-  src/Program.cs    启动契约校验、互斥体、资源定位、WebView2 面板 + JS 桥
-  libs/             WebView2 控件库(取自字醒包,版本 1.0.4314.35)
-panel/    面板前端(纯 HTML/JS,阶段1 无构建步骤)
+  src/Program.cs       启动契约校验、互斥体、资源定位、WebView2 面板 + JS 桥
+  libs/                WebView2 控件库(版本 1.0.4314.35)
+panel/    面板前端(纯 HTML/CSS/JS)
 dist/     构建产物(git 忽略)
 build.ps1 一键构建
 ```
@@ -48,13 +47,15 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -RunStandalone   # 构建并�
 - 快捷键 **Ctrl+Alt+Shift+Y**（仅在 Illustrator 前台时响应）显示/展开面板。
 - 显示状态记录在 `%LOCALAPPDATA%\YunLi\panel-visible`。
 
-## 在线更新
+## 在线更新与热更新
 
-`update.json` 是版本清单(版本、Tag、资产名、SHA-256、说明)，位于仓库根目录。面板首页连接行提供「检查更新」：
+`update.json` 是版本清单（顶层保留旧版 `version`/`tag`/`asset`/`sha256`/`notes`/`published`，新增 `shellVersion` 与 `hot` 对象），位于仓库根目录。面板首页连接行提供「检查更新」：
 
 - 清单按 `gh-proxy` → `ghfast` → `ghproxy` → jsDelivr → raw.githubusercontent 依次回退，国内网络可直接使用。
-- 发布包从 GitHub Release 下载，同样按镜像回退；下载后校验 SHA-256，再交给后台脚本，在 Illustrator 退出后替换 `.aip` 并重新打开。
-- 设置 `YUNLI_UPDATE_MANIFEST` / `YUNLI_UPDATE_ASSET` 可指向自建镜像或本地文件做测试。
+- **旧版兼容升级**：`v0.3.3` 及更早版本只读取顶层 `asset` / `sha256`，自动下载完整单文件 `YunLiTools.aip`，在退出 Illustrator 后替换并升级到支持热更新的新壳（`shellVersion = 2`）。
+- **免重启轻量热更新**：`v0.4.0` 及以上版本在 `shellVersion >= hot.minShell` 时自动下载轻量热更包 `YunLiHot-<ver>.zip`（仅含轻量 `YunLiCore.exe`、`YunLiNative.dll`、`assets/web/` 和 `assets/host/`，复用基线 WebView2/ONNX/OCR/PDF 依赖），解压到 `%LOCALAPPDATA%\YunLi\hot\<ver>\` 后通知 C 壳卸载旧核心与 `YunLiNative.dll` 并立即重载，无需重启 Illustrator；若热更版本启动失败会自动回滚到上一版本或 `.aip` 基线。
+- 当未来版本需要升级 C 壳时提高 `YUNLI_SHELL_VERSION` / `hot.minShell`，客户端会自动回退走全量 `.aip` 冷更新。
+- 设置 `YUNLI_UPDATE_MANIFEST`、`YUNLI_UPDATE_ASSET`、`YUNLI_UPDATE_HOT_ASSET` 可指向自建镜像或本地测试地址。
 
 发布新版本：
 
@@ -62,7 +63,7 @@ powershell -ExecutionPolicy Bypass -File build.ps1 -RunStandalone   # 构建并�
 powershell -ExecutionPolicy Bypass -File tools/release.ps1 -Notes "更新说明" -Publish
 ```
 
-脚本读取 `core/src/Program.cs` 的 `Version`，构建单文件版，创建/更新 `yunli-v<版本>` Release，并重写 `update.json`；提交推送该文件后面板即可检查到新版本。
+脚本读取 `core/src/Program.cs` 的 `Version` 与 `shell/src/main.c` 的 `YUNLI_SHELL_VERSION`，构建单文件版 `YunLiTools.aip` 与轻量热更包 `YunLiHot-<版本>.zip`，一并上传到 `yunli-v<版本>` Release，并重写向后兼容的 `update.json`；提交推送该文件后面板即可检查到新版本。
 
 ## 定向验证
 
@@ -92,7 +93,7 @@ Illustrator 加载 YunLiTools.aip
 ```
 
 开发便利:
-- 环境变量 `YUNMAN_PAYLOAD_DIR` 指定载荷目录,免复制。
+- 环境变量 `YUNLI_PAYLOAD_DIR` 指定载荷目录,免复制。
 - `--standalone` 参数让核心脱离 Illustrator 独立运行(本机已验证:
   WebView2 就绪、桥握手成功)。
 
@@ -114,5 +115,4 @@ Illustrator 加载 YunLiTools.aip
 - [x] 标记与工艺导出面板、脚本参数适配、共用画板图片查看器已实现；真实 Illustrator 操作待验证。
 - [x] 字体与文字已并入主页面，OCR 资源惰性加载并复用消息桥；真实识别与重建待验证。
 - [ ] 阶段4:发布版打包器 + CI
-- 字醒版 WebView2 事件名与公开 SDK 不同(`CoreWebView2InitializationCompleted`),
-  若换成官方 NuGet 包需改回 `CoreWebView2Ready`
+- 当前 WebView2 控件库事件名为 `CoreWebView2InitializationCompleted`，若换成新版官方 NuGet 包需注意对应事件名。

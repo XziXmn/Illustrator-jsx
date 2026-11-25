@@ -17,7 +17,7 @@ using System.Text;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
 
-namespace ZiXing
+namespace YunLi.Core
 {
 	public static class OcrEngine
 	{
@@ -35,14 +35,26 @@ namespace ZiXing
 		private const float UnclipRatio = 1.6f;
 		private const int RecHeight = 48;
 
+		private static string ResolveServerDir(string assets)
+		{
+			string dir = Path.Combine(assets ?? "", "ocr", "server");
+			if (File.Exists(Path.Combine(dir, "det.onnx")) &&
+				File.Exists(Path.Combine(dir, "rec.onnx")) &&
+				File.Exists(Path.Combine(dir, "dict.txt"))) return dir;
+			string baseline = Path.Combine(
+				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+				"YunLi", "assets", "ocr", "server");
+			if (File.Exists(Path.Combine(baseline, "det.onnx")) &&
+				File.Exists(Path.Combine(baseline, "rec.onnx")) &&
+				File.Exists(Path.Combine(baseline, "dict.txt"))) return baseline;
+			return null;
+		}
+
 		public static bool Available(string assets)
 		{
 			try
 			{
-				string dir = Path.Combine(assets, "ocr", "server");
-				if (!File.Exists(Path.Combine(dir, "det.onnx")) ||
-					!File.Exists(Path.Combine(dir, "rec.onnx")) ||
-					!File.Exists(Path.Combine(dir, "dict.txt"))) return false;
+				if (ResolveServerDir(assets) == null) return false;
 				return File.Exists(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "onnxruntime.dll"));
 			}
 			catch (IOException) { return false; }
@@ -54,7 +66,8 @@ namespace ZiXing
 			lock (Gate)
 			{
 				if (detSession != null) return;
-				string dir = Path.Combine(assets, "ocr", "server");
+				string dir = ResolveServerDir(assets);
+				if (dir == null) throw new Exception("缺少本地 OCR 模型文件。");
 				detSession = new InferenceSession(Path.Combine(dir, "det.onnx"));
 				recSession = new InferenceSession(Path.Combine(dir, "rec.onnx"));
 				List<string> tokens = new List<string>();
@@ -184,7 +197,7 @@ namespace ZiXing
 		}
 
 		// ---------------- 竖排:整图切列 → 列内切字 → 逐列横向拼接识别 ----------------
-		// 思路与字醒 wasm 版一致:竖排不走 det,直接按墨迹投影切列(从右到左),
+		// 竖排不走 det，直接按墨迹投影切列（从右到左），
 		// 每列按行投影切出字格,横向拼成条带交给横向 rec,条带即列的预览图。
 
 		private static object VerticalRecognize(string imagePath)

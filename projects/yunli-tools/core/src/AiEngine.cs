@@ -18,7 +18,7 @@ using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
 
-namespace ZiXing
+namespace YunLi.Core
 {
 	public static class AiEngine
 	{

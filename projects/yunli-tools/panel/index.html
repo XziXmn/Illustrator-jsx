@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'">
 <title>YunLi 工具箱</title>
-<link rel="stylesheet" href="style.css?v=29">
-<link rel="stylesheet" href="font/style.css?v=29">
+<link rel="stylesheet" href="style.css?v=30">
+<link rel="stylesheet" href="font/style.css?v=30">
 <script src="js/theme-boot.js"></script>
 </head>
 <body>
@@ -102,6 +102,57 @@
   </div>
   <div class="page-foot"><div class="page-actions"><p class="hint">不经过 Illustrator</p><button id="pdf-run" class="primary" type="button">开始转曲</button></div></div>
 </main>
+<main id="view-split" class="page tool-page" aria-labelledby="split-title" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="split-title">图片分切</h1></header>
+    <div class="sheet spot-sheet">
+      <div class="export-context">
+        <p id="split-status" class="status" role="status" aria-live="polite">同时选中 1 张嵌入位图与矩形刀线框。</p>
+        <button id="split-refresh" class="icon-button" type="button" aria-label="刷新选区识别" title="刷新选区识别"></button>
+      </div>
+      <section class="zone">
+        <p id="split-meta" class="hint split-meta">未识别到选区对象。</p>
+        <div class="rule"></div>
+        <div class="spot-cond-row">
+          <label class="field inline-field">像素余量<span class="input-unit"><input id="sp-pad" value="2" inputmode="numeric" aria-label="像素余量"><span>px</span></span></label>
+        </div>
+        <div class="stack spot-checks">
+          <label class="check" title="每格独立矩形蒙版，不整体编组"><input id="sp-mask" type="checkbox" checked>套用矩形蒙版</label>
+          <label class="check" title="跳过与位图无重叠的矩形刀线框"><input id="sp-skip" type="checkbox" checked>跳过无重叠框</label>
+          <label class="check" title="分切完成后隐藏原始位图"><input id="sp-hide" type="checkbox" checked>隐藏原位图</label>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">原像素无损裁切</p><button id="split-run" class="primary" type="button" disabled>开始分切</button></div></div>
+</main>
+<main id="view-spotselect" class="page tool-page" aria-labelledby="spotselect-title" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="spotselect-title">专色选择</h1></header>
+    <div class="sheet spot-sheet">
+      <div class="export-context">
+        <p id="ss-status" class="status" role="status" aria-live="polite">正在读取文档专色…</p>
+        <button id="ss-refresh" class="icon-button" type="button" aria-label="刷新专色列表" title="刷新专色列表"></button>
+      </div>
+      <section class="zone">
+        <div class="spot-target-row">
+          <label class="field spot-select-field">目标专色<select id="ss-spot" aria-label="目标专色"><option value="">无可用专色</option></select></label>
+          <button id="ss-pick" class="secondary" type="button" title="从当前选中对象吸取专色与百分比">吸取所选</button>
+        </div>
+        <div class="spot-cond-row">
+          <label class="field inline-field">条件<select id="ss-mode" aria-label="比较条件"><option value="eq">等于 (=)</option><option value="gt">大于 (>)</option><option value="gte">大于等于 (≥)</option><option value="lt">小于 (<)</option><option value="lte">小于等于 (≤)</option></select></label>
+          <label class="field inline-field">浓度<span class="input-unit"><input id="ss-percent" value="100" inputmode="decimal" aria-label="专色百分比"><span>%</span></span></label>
+        </div>
+        <div class="rule"></div>
+        <div class="spot-scope-row">
+          <label class="check"><input id="ss-fill" type="checkbox" checked>匹配填充</label>
+          <label class="check"><input id="ss-stroke" type="checkbox" checked>匹配描边</label>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">仅选可见未锁定对象</p><button id="ss-run" class="primary" type="button" disabled>选择对象</button></div></div>
+</main>
 <main id="view-fonts" class="page font-page" hidden><div class="page-scroll"><p class="status">请先构建项目以加载字体工具。</p></div></main>
 <dialog id="artboard-preview" class="artboard-preview" aria-labelledby="preview-title">
   <header class="preview-head"><strong id="preview-title">画板预览</strong><button id="preview-close" type="button" class="icon-button" aria-label="关闭画板预览"></button></header>
@@ -122,14 +173,15 @@
     <div data-id="boards" class="board-list"><p class="empty-state">连接文档后显示画板。</p></div>
   </section>
 </template>
-<script src="js/bridge.js?v=29"></script>
-<script src="js/tool-bridge.js?v=29"></script>
-<script src="js/nav.js?v=29"></script>
-<script src="js/update.js?v=29"></script>
-<script src="js/font-loader.js?v=29"></script>
-<script src="js/home.js?v=29"></script>
-<script src="js/export-preview.js?v=29"></script>
-<script src="js/tools.js?v=29"></script>
-<script src="js/pdf.js?v=29"></script>
+<script src="js/bridge.js?v=31"></script>
+<script src="js/tool-bridge.js?v=31"></script>
+<script src="js/nav.js?v=31"></script>
+<script src="js/update.js?v=31"></script>
+<script src="js/font-loader.js?v=31"></script>
+<script src="js/home.js?v=31"></script>
+<script src="js/export-preview.js?v=31"></script>
+<script src="js/tools.js?v=31"></script>
+<script src="js/pdf.js?v=31"></script>
+<script src="js/spot-tools.js?v=31"></script>
 </body>
 </html>

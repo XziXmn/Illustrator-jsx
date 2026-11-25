@@ -23,7 +23,12 @@ assert.ok(html.indexOf('src="js/font-loader.js')<html.indexOf('src="js/home.js')
 assert.ok(!/<iframe/i.test(view[0]),"字体应为同一文档视图");
 assert.ok(!/src="(?:font\/)?(?:js\/panel.js|ocr\/)/.test(html),"OCR 资源不能拖慢主页面初始化");
 assert.ok(legacy.includes("../index.html#fonts"),"旧入口应跳回统一视图");
-assert.ok(!runtime.includes("window.__zixingDeliver"),"字体模块不能覆盖共用消息处理器");
+assert.ok(!runtime.includes("window.__yunliDeliver") && !runtime.includes("window.__zixingDeliver"),"字体模块不能覆盖共用消息处理器");
 assert.ok(runtime.includes("window.YunLiTool.requestNative"),"字体应复用共用消息桥");
 assert.ok(runtime.includes("document.currentScript.src"),"资源地址应相对模块脚本定位");
-console.log("字体单页集成、控件唯一性和共享桥检查通过");
+const panelJs = fs.readFileSync(path.join(root,"font/js/panel.js"),"utf8");
+const paddleJs = fs.readFileSync(path.join(root,"font/js/paddle-ocr.js"),"utf8");
+for (const [name, content] of [["index.html", html], ["native-runtime.js", runtime], ["panel.js", panelJs], ["paddle-ocr.js", paddleJs]]) {
+  assert.ok(!/zixing|字醒|酥脆|license-badge|ZX-XXXX/i.test(content), name + " 不应残留第三方品牌或授权标识");
+}
+console.log("字体单页集成、控件唯一性、无品牌残留和共享桥检查通过");

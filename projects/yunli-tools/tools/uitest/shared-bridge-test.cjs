@@ -14,7 +14,7 @@ const code=fs.readFileSync(path.resolve(__dirname,"../../panel/js/tool-bridge.js
   assert.notEqual(sent[0].id,sent[1].id,"两个模块必须使用唯一请求编号");
   assert.equal(sent[0].method,"tool");
   assert.equal(sent[1].method,"match");
-  const deliver=message=>env.window.__zixingDeliver(Buffer.from(JSON.stringify(message)).toString("base64"));
+  const deliver=message=>env.window.__yunliDeliver(Buffer.from(JSON.stringify(message)).toString("base64"));
   deliver({id:sent[1].id,eventType:"progress",data:{done:1}});
   deliver({id:sent[0].id,ok:true,data:{done:true}});
   deliver({id:sent[1].id,ok:true,data:{rows:[]}});

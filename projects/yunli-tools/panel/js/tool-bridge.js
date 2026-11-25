@@ -4,9 +4,13 @@
   var channel = window.chrome && window.chrome.webview;
   var next = 0;
   var pending = {};
-  window.__zixingDeliver = function (encoded) {
+  window.__yunliDeliver = function (encoded) {
     var bytes = Uint8Array.from(atob(encoded), function (c) { return c.charCodeAt(0); });
     var message = JSON.parse(new TextDecoder().decode(bytes));
+    if (!message.id && message.eventType) {
+      window.dispatchEvent(new CustomEvent("yunli:" + message.eventType, { detail: message.data || {} }));
+      return;
+    }
     var entry = pending[message.id];
     if (!entry) return;
     if (message.eventType === "progress") {

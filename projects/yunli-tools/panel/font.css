@@ -43,7 +43,6 @@ body:has(#view-fonts[hidden]) .font-suggest { display:none!important; }
 .font-page .compare { display:grid; gap:var(--control-gap); margin-top:var(--item-gap); padding:8px; border-radius:6px; background:#fff; }
 .font-page .compare img { width:100%; height:48px; object-fit:contain; }
 .font-page progress { display:block; width:100%; height:4px; margin-top:var(--item-gap); border:0; accent-color:var(--brand); }
-.font-page #license,.font-page #update,.font-page #license-badge,.font-page #license-account,.font-page footer { display:none!important; }
 /* 校对时仅切换业务状态，公共框架不变。 */
 .font-page #page-restore:has(#restore-review:not([hidden])) .intro,
 .font-page #page-restore:has(#restore-review:not([hidden])) .scope,

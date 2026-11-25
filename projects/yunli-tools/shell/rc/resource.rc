@@ -1,12 +1,12 @@
 ﻿// YunLi工具箱 .aip 资源
 // plugin.pipl 由官方 tools/pipl/create_pipl.py 生成(见 build.ps1)
 
-// PIPL: 资源类型 "pipl" / 名称 "plugin"(同 SDK EmptyPanel 示例;
-// Windows 资源名/类型匹配不区分大小写,等价于字醒的 PIPL/PLUGIN)
+// PIPL: 资源类型 "pipl" / 名称 "plugin"(Windows 资源名/类型匹配不区分大小写)
 plugin pipl "plugin.pipl"
 
-#ifdef YUNMAN_EMBED_PAYLOAD
-101 10 "payload.bin"    // 发布: 嵌入 YunLiCore.exe (类型10/名称101, 同字醒)
+#ifdef YUNLI_EMBED_PAYLOAD
+101 10 "payload.bin"    // 发布: 嵌入 YunLiCore.exe (类型10/名称101)
+102 10 "native.bin"     // 发布: 嵌入基线 YunLiNative.dll (类型10/名称102, 支持热插拔重载)
 #endif
 
 // 停靠面板收起时的图标(SVG,2x)
