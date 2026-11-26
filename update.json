@@ -1,14 +1,14 @@
 {
-    "version":  "0.4.0",
-    "tag":  "yunli-v0.4.0",
+    "version":  "0.4.1",
+    "tag":  "yunli-v0.4.1",
     "asset":  "YunLiTools.aip",
-    "sha256":  "c15464f2fb3b39c06212eb99ed918249791c0b599ad6427c6500198bf9b0c542",
+    "sha256":  "1c0c1100470ca17ec5fe99032d3c5ab3f7aa3f07232e7f95cb4c5fb40fe3e4a6",
     "shellVersion":  2,
     "hot":  {
-                "asset":  "YunLiHot-0.4.0.zip",
-                "sha256":  "534c9f0f009f23b95a9d8ed6d3564fe4f297bb803db0e8f1898de5178e7b3489",
+                "asset":  "YunLiHot-0.4.1.zip",
+                "sha256":  "ac54288484c75c5be0e304ccbf56ac75495f07fbb6a31a54722f29180e115e4d",
                 "minShell":  2
             },
-    "notes":  "新增图片分切（无损像素裁切与独立蒙版）与专色选择（5档浓度筛选与选区实时识别）；支持免重启 GitHub 轻量热更新并兼容旧版自动升级；统一界面下拉框样式并修复高分屏停靠显示。",
-    "published":  "2026-11-25"
+    "notes":  "修复专色选择漏选部分矢量对象（接入 AdjustObjectAIColors 支持可编辑文字、多外观填描、渐变/网格、混合/封套、符号、带专色剪切蒙版及 PDF/CDR 量化浓度容差）。",
+    "published":  "2026-11-26"
 }
