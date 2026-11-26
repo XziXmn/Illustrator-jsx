@@ -208,9 +208,12 @@ var YunLiTools = {
                     walk(it.pageItems);
                 } else if (t === "CompoundPathItem") {
                     if (it.pathItems.length > 0 && editable(it)) {
-                        var p0 = it.pathItems[0];
-                        if ((matchFill && p0.filled && okColor(p0.fillColor)) || (matchStroke && p0.stroked && okColor(p0.strokeColor))) {
-                            matched.push(it);
+                        for (var cp = 0; cp < it.pathItems.length; cp++) {
+                            var p0 = it.pathItems[cp];
+                            if ((matchFill && p0.filled && okColor(p0.fillColor)) || (matchStroke && p0.stroked && okColor(p0.strokeColor))) {
+                                matched.push(it);
+                                break;
+                            }
                         }
                     }
                 } else if (t === "PathItem") {

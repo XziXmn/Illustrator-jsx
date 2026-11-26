@@ -155,7 +155,7 @@ static const char kSuiteNotifier[]    = "AI Notifier Suite";
 
 #define YUNLI_SHELL_VERSION 2
 #ifndef YUNLI_BASE_VERSION
-#define YUNLI_BASE_VERSION  "0.4.2"
+#define YUNLI_BASE_VERSION  "0.4.3"
 #endif
 
 /* ---------------- 全局状态 ---------------- */

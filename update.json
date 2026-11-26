@@ -1,14 +1,14 @@
 {
-    "version":  "0.4.2",
-    "tag":  "yunli-v0.4.2",
+    "version":  "0.4.3",
+    "tag":  "yunli-v0.4.3",
     "asset":  "YunLiTools.aip",
-    "sha256":  "3aa4ad546194237876a5f86f867779cfe5eafac8ba49daf41c123f4d9c211a18",
+    "sha256":  "f30fc7bf8f7a781e4d3f178053acfd1a9d4bf28023e6635a2a02bade2d373ce1",
     "shellVersion":  2,
     "hot":  {
-                "asset":  "YunLiHot-0.4.2.zip",
-                "sha256":  "ea0d55ea728b668db76d0e3ef3e653336099803543698d057bfa13e83ee5ee66",
+                "asset":  "YunLiHot-0.4.3.zip",
+                "sha256":  "9dd962acf5b4225db559b3b8da70687a354b40cbb3aa205f9efc8c7eeddd304a",
                 "minShell":  2
             },
-    "notes":  "修复编组外观与复合路径专色漏选，检查更新提示自动隐藏。",
+    "notes":  "修复嵌套剪切组/编组内复合路径无法选中的问题。",
     "published":  "2026-11-26"
 }

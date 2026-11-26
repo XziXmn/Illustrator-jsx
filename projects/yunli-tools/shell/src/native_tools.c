@@ -1829,17 +1829,44 @@ static int MatchArtOwnStyle(AIArtHandle art, const SpotMatchCtx *ctx, int matchF
     return MatchArtStylePaintFields(style, ctx, matchFill, matchStroke);
 }
 
-static int HasCompoundPathAncestor(AIArtHandle art)
+static AIArtHandle GetTopmostCompoundAncestor(AIArtHandle art)
 {
+    AIArtHandle topCompound = NULL;
     AIArtHandle cur = art;
     while (cur) {
+        short t = 0;
+        if (N.art->GetArtType(cur, &t) == 0 && t == kCompoundPathArt) {
+            topCompound = cur;
+        }
         AIArtHandle par = NULL;
         if (N.art->GetArtParent(cur, &par) != 0 || !par || par == cur) break;
-        short ptype = 0;
-        if (N.art->GetArtType(par, &ptype) == 0 && ptype == kCompoundPathArt) return 1;
         cur = par;
     }
-    return 0;
+    return topCompound ? topCompound : art;
+}
+
+/* 递归选中对象及其子路径: Illustrator 中复合路径/编组需将内部子路径一并标为 kArtSelected 才能在画布和选区中完整生效 */
+static void SelectArtRecursive(AIArtHandle art)
+{
+    if (!art) return;
+    int32_t attr = 0;
+    if (N.art->GetArtUserAttr(art, kArtHidden | kArtLocked, &attr) == 0 && (attr & (kArtHidden | kArtLocked))) {
+        return;
+    }
+    short type = 0;
+    if (N.art->GetArtType(art, &type) != 0) return;
+    if (type == kCompoundPathArt || type == kGroupArt) {
+        AIArtHandle ch = NULL;
+        if (N.art->GetArtFirstChild(art, &ch) == 0) {
+            while (ch) {
+                SelectArtRecursive(ch);
+                AIArtHandle nx = NULL;
+                if (N.art->GetArtSibling(ch, &nx) != 0) break;
+                ch = nx;
+            }
+        }
+    }
+    N.art->SetArtUserAttr(art, kArtSelected, kArtSelected);
 }
 
 /* 递归检查复合路径下所有子路径(兼容复合路径内嵌套编组的结构) */
@@ -1853,6 +1880,7 @@ static int MatchCompoundChildren(AIArtHandle container, const SpotMatchCtx *ctx,
             if (t == kPathArt) {
                 if (MatchPathStyleDirect(ch, ctx, matchFill, matchStroke)) return 1;
                 if (MatchArtOwnStyle(ch, ctx, matchFill, matchStroke)) return 1;
+                if (MatchArtByColors(ch, ctx, matchFill, matchStroke)) return 1;
             } else if (t == kGroupArt || t == kCompoundPathArt) {
                 if (MatchArtOwnStyle(ch, ctx, matchFill, matchStroke)) return 1;
                 if (MatchCompoundChildren(ch, ctx, matchFill, matchStroke)) return 1;
@@ -1934,8 +1962,8 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
             short type = 0;
             if (N.art->GetArtType(art, &type) != 0) continue;
 
-            /* 复合路径内部任何子对象交由最外层 kCompoundPathArt 统一匹配与选中 */
-            if (HasCompoundPathAncestor(art)) continue;
+            AIArtHandle topTarget = GetTopmostCompoundAncestor(art);
+            if (ArtVecContains(&picked, topTarget)) continue;
 
             if (type == kPathArt) {
                 AIBoolean isGuide = 0;
@@ -1945,6 +1973,13 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 
             /* 编组仅在自身外观面板(含多填充/多描边/ActiveStyle)命中目标专色时才选中, 绝不因普通子对象误选整组 */
             if (type == kGroupArt) {
+                if (topTarget != art) {
+                    /* 复合路径内嵌套编组: 若自身外观命中则选中外层复合路径 */
+                    if (MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke)) {
+                        ArtVecPushUnique(&picked, topTarget);
+                    }
+                    continue;
+                }
                 AIArtHandle par = NULL;
                 if (N.art->GetArtParent(art, &par) != 0 || !par || par == art) continue; /* 跳过图层根组 */
                 if (MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke)) {
@@ -1955,6 +1990,7 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 
             int hit = 0;
             if (type == kPathArt) {
+                /* 同时覆盖独立路径与复合路径子路径(若为复合路径子路径, 命中后统一收敛到最外层复合路径并去重) */
                 hit = MatchPathStyleDirect(art, &baseCtx, matchFill, matchStroke);
                 if (!hit) hit = MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke);
                 if (!hit) hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
@@ -1982,7 +2018,7 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
             }
 
             if (hit) {
-                ArtVecPushUnique(&picked, art);
+                ArtVecPushUnique(&picked, topTarget);
             }
         }
     }
@@ -1990,7 +2026,7 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 
     N.match->DeselectAll();
     for (int i = 0; i < picked.count; i++) {
-        N.art->SetArtUserAttr(picked.items[i], kArtSelected | kArtFullySelected, kArtSelected | kArtFullySelected);
+        SelectArtRecursive(picked.items[i]);
     }
     N.doc->RedrawDocument();
 
