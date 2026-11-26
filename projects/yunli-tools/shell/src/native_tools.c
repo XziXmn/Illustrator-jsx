@@ -37,6 +37,7 @@ typedef void    *AILayerHandle;
 typedef void    *AIDocumentHandle;
 typedef void    *AIAppContextHandle;
 typedef void    *AICustomColorHandle;
+typedef void    *AIArtStyleHandle;
 typedef void    *AIPatternHandle;
 typedef void    *AIGradientHandle;
 typedef void   **AIMdMemoryHandle;
@@ -253,8 +254,25 @@ enum {
     kCompoundPathArt = 3,
     kPlacedArt       = 7,
     kRasterArt       = 9,
-    kTextFrameArt    = 12
+    kPluginArt       = 10,
+    kMeshArt         = 11,
+    kTextFrameArt    = 12,
+    kSymbolArt       = 13
 };
+
+enum {
+    kVisitColorsDirectOnly  = 0x0004,
+    kVisitColorsSolidOnly   = 0x0008,
+    kVisitColorsFillsOnly   = 0x0010,
+    kVisitColorsStrokesOnly = 0x0020,
+    kVisitColorsReadOnly    = 0x0040,
+    kVisitColorsInResultArt = 0x0080
+};
+
+#define kStyleHasCustomColors 0x0008u
+#define kCanceledErr4cc       ((AIErr)0x53544F50) /* 'STOP' */
+
+typedef void (*AIAdjustColorFunc)(AIColor *color, void *userData, AIErr *result, AIBoolean *altered);
 
 enum {
     kPlaceDefault        = 0,
@@ -366,7 +384,20 @@ typedef struct {
     AIErr (*SetPathStyle)(AIArtHandle path, const AIPathStyle *style);                     /* 1 */
     AIErr (*GetCurrentPathStyle)(AIPathStyle *style, AIPathStyleMap *stylemap,
                                  void **advStrokeParams, AIBoolean *outHasAdvFill);        /* 2 */
+    void *pad3_21[19];                                                                     /* 3..21 */
+    AIErr (*AdjustObjectAIColors)(AIArtHandle art, AIAdjustColorFunc cb, void *clientData,
+                                  uint16_t controlFlags, AIBoolean *madeReplacement);      /* 22 */
 } AIPathStyleSuiteMin;
+
+typedef struct {
+    AIErr    (*GetStyledArt)(AIArtHandle art, AIArtHandle *styledArt);                     /* 0 */
+    AIErr    (*GetArtStyle)(AIArtHandle art, AIArtStyleHandle *artStyle);                  /* 1 */
+    void    *pad2_10[9];                                                                   /* 2..10 */
+    AIErr    (*GetPaintAttributes)(AIArtStyleHandle artStyle, AIPathStyle *style,
+                                   void *paintData);                                       /* 11 */
+    void    *pad12_32[21];                                                                 /* 12..32 */
+    uint32_t (*ExamineStyle)(AIArtStyleHandle artStyle, uint32_t checkFor);                /* 33 */
+} AIArtStyleSuiteMin;
 
 typedef struct {
     AIErr (*GetSelectedArt)(AIArtHandle ***matches, int32_t *numMatches); /* 0 */
@@ -454,6 +485,7 @@ static struct {
     AIColorSpaceSuiteMin  *cs;
     AICustomColorSuiteMin *cc;
     AIBlendStyleSuiteMin  *blend;
+    AIArtStyleSuiteMin    *artStyle;
 } N;
 
 YUNLI_NATIVE_API void __cdecl YunLiNativeInit(void *basicSuite, void *pluginSelf, void *unicodeSuite, YunLiLogFn logFn)
@@ -499,6 +531,7 @@ static int EnsureSuites(void)
     N.cs    = (AIColorSpaceSuiteMin *) AcquireRange("AI Color Space Suite", 7, 5);
     N.cc    = (AICustomColorSuiteMin *)AcquireRange("AI Custom Color Suite", 8, 6);
     N.blend = (AIBlendStyleSuiteMin *) AcquireRange("AI Blend Style Suite", 5, 4);
+    N.artStyle = (AIArtStyleSuiteMin *)AcquireRange("AI Art Style Suite", 8, 6);
     if (!N.doc || !N.art || !N.raster || !N.path || !N.style || !N.match || !N.mem || !N.layer || !N.group || !N.cc) {
         return 0;
     }
@@ -1414,6 +1447,40 @@ static int ExtractSpotFromPathStyle(const AIPathStyle *st, const AIPathStyleMap 
     return 0;
 }
 
+typedef struct {
+    char       *spotOut;
+    int         spotCap;
+    double     *pctOut;
+    const char **whereOut;
+    const char *label;
+    int         found;
+} SpotInspectCtx;
+
+static void SpotInspectCallback(AIColor *color, void *userData, AIErr *result, AIBoolean *altered)
+{
+    if (altered) *altered = 0;
+    SpotInspectCtx *ctx = (SpotInspectCtx *)userData;
+    if (!ctx || ctx->found || !color || color->kind != kCustomColor || !color->c.c.color) return;
+    AICustomColor cc;
+    memset(&cc, 0, sizeof(cc));
+    if (N.cc->GetCustomColor(color->c.c.color, &cc) != 0) return;
+    if (!(cc.flag & kCustomSpotColor) || (cc.flag & kCustomRegistrationColor)) return;
+    UStr uname = {0};
+    if (N.cc->GetCustomColorName(color->c.c.color, &uname) == 0) {
+        UStrToUtf8(&uname, ctx->spotOut, ctx->spotCap);
+        N.ustr->Destroy(&uname);
+        if (ctx->spotOut[0]) {
+            double pct = (1.0 - color->c.c.tint) * 100.0;
+            if (pct < 0.0) pct = 0.0;
+            if (pct > 100.0) pct = 100.0;
+            *ctx->pctOut = pct;
+            *ctx->whereOut = ctx->label;
+            ctx->found = 1;
+            if (result) *result = kCanceledErr4cc;
+        }
+    }
+}
+
 static int ExtractArtSpotSample(AIArtHandle art, char *spotOut, int spotCap, double *pctOut, const char **whereOut)
 {
     short type = 0;
@@ -1428,14 +1495,23 @@ static int ExtractArtSpotSample(AIArtHandle art, char *spotOut, int spotCap, dou
                 ch = nx;
             }
         }
+        /* 兜底: 编组/复合路径本身的外观填充或描边 */
+        if (N.style && N.style->AdjustObjectAIColors) {
+            SpotInspectCtx ic = { spotOut, spotCap, pctOut, whereOut, "fill", 0 };
+            N.style->AdjustObjectAIColors(art, SpotInspectCallback, &ic,
+                kVisitColorsReadOnly | kVisitColorsSolidOnly | kVisitColorsFillsOnly, NULL);
+            if (ic.found) return 1;
+            ic.label = "stroke";
+            N.style->AdjustObjectAIColors(art, SpotInspectCallback, &ic,
+                kVisitColorsReadOnly | kVisitColorsSolidOnly | kVisitColorsStrokesOnly, NULL);
+            if (ic.found) return 1;
+        }
         return 0;
     }
     if (type == kPathArt) {
         AIBoolean isGuide = 0;
-        int32_t attr = 0;
         N.path->GetPathGuide(art, &isGuide);
-        N.art->GetArtUserAttr(art, kArtIsClipMask, &attr);
-        if (isGuide || (attr & kArtIsClipMask)) return 0;
+        if (isGuide) return 0;
     }
 
     AIPathStyle st;
@@ -1443,6 +1519,18 @@ static int ExtractArtSpotSample(AIArtHandle art, char *spotOut, int spotCap, dou
     memset(&st, 0, sizeof(st));
     if (N.style->GetPathStyle(art, &st, &hasAdv) == 0) {
         if (ExtractSpotFromPathStyle(&st, NULL, spotOut, spotCap, pctOut, whereOut)) return 1;
+    }
+
+    /* 覆盖可编辑文字、外观多填充/多描边、渐变、网格、混合/封套与符号 */
+    if (N.style && N.style->AdjustObjectAIColors) {
+        SpotInspectCtx ic = { spotOut, spotCap, pctOut, whereOut, "fill", 0 };
+        N.style->AdjustObjectAIColors(art, SpotInspectCallback, &ic,
+            kVisitColorsReadOnly | kVisitColorsSolidOnly | kVisitColorsInResultArt | kVisitColorsFillsOnly, NULL);
+        if (ic.found) return 1;
+        ic.label = "stroke";
+        N.style->AdjustObjectAIColors(art, SpotInspectCallback, &ic,
+            kVisitColorsReadOnly | kVisitColorsSolidOnly | kVisitColorsInResultArt | kVisitColorsStrokesOnly, NULL);
+        if (ic.found) return 1;
     }
 
     if (type == kRasterArt) {
@@ -1536,6 +1624,62 @@ static int MatchPercent(double actual, double target, const char *mode, double t
     return fabs(actual - target) <= (tol > eps ? tol : eps);
 }
 
+typedef struct {
+    AICustomColorHandle targetCC;
+    const char         *spotName;
+    double              targetPct;
+    const char         *mode;
+    double              tol;
+    int                 matched;
+} SpotMatchCtx;
+
+static int IsTargetCustomColor(AICustomColorHandle cc, AICustomColorHandle targetCC, const char *spotName)
+{
+    if (!cc) return 0;
+    if (cc == targetCC) return 1;
+    UStr uname = {0};
+    if (N.cc->GetCustomColorName(cc, &uname) == 0) {
+        char buf[256];
+        UStrToUtf8(&uname, buf, sizeof(buf));
+        N.ustr->Destroy(&uname);
+        if (buf[0] && strcmp(buf, spotName) == 0) return 1;
+    }
+    return 0;
+}
+
+static int MatchColorSpot(const AIColor *color, const SpotMatchCtx *ctx)
+{
+    if (!color || color->kind != kCustomColor || !color->c.c.color) return 0;
+    if (!IsTargetCustomColor(color->c.c.color, ctx->targetCC, ctx->spotName)) return 0;
+    double pct = (1.0 - color->c.c.tint) * 100.0;
+    if (pct < 0.0) pct = 0.0;
+    if (pct > 100.0) pct = 100.0;
+    return MatchPercent(pct, ctx->targetPct, ctx->mode, ctx->tol);
+}
+
+static void SpotMatchCallback(AIColor *color, void *userData, AIErr *result, AIBoolean *altered)
+{
+    if (altered) *altered = 0;
+    SpotMatchCtx *ctx = (SpotMatchCtx *)userData;
+    if (!ctx || ctx->matched) return;
+    if (MatchColorSpot(color, ctx)) {
+        ctx->matched = 1;
+        if (result) *result = kCanceledErr4cc;
+    }
+}
+
+static int MatchArtByColors(AIArtHandle art, const SpotMatchCtx *baseCtx, int matchFill, int matchStroke)
+{
+    if (!N.style || !N.style->AdjustObjectAIColors) return 0;
+    SpotMatchCtx ctx = *baseCtx;
+    ctx.matched = 0;
+    uint16_t flags = (uint16_t)(kVisitColorsReadOnly | kVisitColorsSolidOnly | kVisitColorsInResultArt);
+    if (matchFill && !matchStroke) flags |= kVisitColorsFillsOnly;
+    else if (!matchFill && matchStroke) flags |= kVisitColorsStrokesOnly;
+    N.style->AdjustObjectAIColors(art, SpotMatchCallback, &ctx, flags, NULL);
+    return ctx.matched;
+}
+
 static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 {
     AIDocumentHandle docH = NULL;
@@ -1576,17 +1720,30 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
     }
     N.ustr->Destroy(&uSpot);
 
-    AIMatchingArtSpec specs[3];
-    specs[0].type = kPathArt;      specs[0].whichAttr = 0; specs[0].attr = 0;
-    specs[1].type = kRasterArt;    specs[1].whichAttr = 0; specs[1].attr = 0;
-    specs[2].type = kTextFrameArt; specs[2].whichAttr = 0; specs[2].attr = 0;
+    AIMatchingArtSpec specs[8];
+    specs[0].type = kPathArt;         specs[0].whichAttr = 0; specs[0].attr = 0;
+    specs[1].type = kCompoundPathArt; specs[1].whichAttr = 0; specs[1].attr = 0;
+    specs[2].type = kTextFrameArt;    specs[2].whichAttr = 0; specs[2].attr = 0;
+    specs[3].type = kRasterArt;       specs[3].whichAttr = 0; specs[3].attr = 0;
+    specs[4].type = kMeshArt;         specs[4].whichAttr = 0; specs[4].attr = 0;
+    specs[5].type = kPluginArt;       specs[5].whichAttr = 0; specs[5].attr = 0;
+    specs[6].type = kSymbolArt;       specs[6].whichAttr = 0; specs[6].attr = 0;
+    specs[7].type = kGroupArt;        specs[7].whichAttr = 0; specs[7].attr = 0;
 
     AIArtHandle **all = NULL;
     int32_t allCount = 0;
-    if (N.match->GetMatchingArt(specs, 3, &all, &allCount) != 0) {
+    if (N.match->GetMatchingArt(specs, 8, &all, &allCount) != 0) {
         SbAppend(out, "{\"ok\":false,\"error\":\"无法遍历文档对象。\"}");
         return;
     }
+
+    SpotMatchCtx baseCtx;
+    baseCtx.targetCC  = targetCC;
+    baseCtx.spotName  = spotName;
+    baseCtx.targetPct = targetPct;
+    baseCtx.mode      = mode;
+    baseCtx.tol       = tol;
+    baseCtx.matched   = 0;
 
     ArtVec picked = {0};
     if (all && allCount > 0) {
@@ -1596,26 +1753,48 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 
             short type = 0;
             if (N.art->GetArtType(art, &type) != 0) continue;
+
             if (type == kPathArt) {
                 AIBoolean isGuide = 0;
-                int32_t attr = 0;
                 N.path->GetPathGuide(art, &isGuide);
-                N.art->GetArtUserAttr(art, kArtIsClipMask, &attr);
-                if (isGuide || (attr & kArtIsClipMask)) continue;
+                if (isGuide) continue;
+                /* 复合路径子路径交由父 kCompoundPathArt 统一匹配与选中 */
+                AIArtHandle parent = NULL;
+                short ptype = 0;
+                if (N.art->GetArtParent(art, &parent) == 0 && parent &&
+                    N.art->GetArtType(parent, &ptype) == 0 && ptype == kCompoundPathArt) {
+                    continue;
+                }
             }
 
-            AIPathStyle st;
-            AIBoolean hasAdv = 0;
-            memset(&st, 0, sizeof(st));
-            int hit = 0;
-            if (N.style->GetPathStyle(art, &st, &hasAdv) == 0) {
-                if (matchFill && st.fillPaint && st.fill.color.kind == kCustomColor && st.fill.color.c.c.color == targetCC) {
-                    double pct = (1.0 - st.fill.color.c.c.tint) * 100.0;
-                    if (MatchPercent(pct, targetPct, mode, tol)) hit = 1;
+            /* 编组仅在自身带有外观自定义专色时才匹配, 不因普通子对象命中而误选整组 */
+            if (type == kGroupArt) {
+                if (!N.artStyle || !N.artStyle->GetArtStyle || !N.artStyle->ExamineStyle || !N.artStyle->GetPaintAttributes) {
+                    continue;
                 }
-                if (!hit && matchStroke && st.strokePaint && st.stroke.color.kind == kCustomColor && st.stroke.color.c.c.color == targetCC) {
-                    double pct = (1.0 - st.stroke.color.c.c.tint) * 100.0;
-                    if (MatchPercent(pct, targetPct, mode, tol)) hit = 1;
+                AIArtStyleHandle gStyle = NULL;
+                if (N.artStyle->GetArtStyle(art, &gStyle) != 0 || !gStyle) continue;
+                if (!(N.artStyle->ExamineStyle(gStyle, kStyleHasCustomColors) & kStyleHasCustomColors)) continue;
+                AIPathStyle st;
+                memset(&st, 0, sizeof(st));
+                if (N.artStyle->GetPaintAttributes(gStyle, &st, NULL) == 0) {
+                    if ((matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, &baseCtx)) ||
+                        (matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, &baseCtx))) {
+                        ArtVecPushUnique(&picked, art);
+                    }
+                }
+                continue;
+            }
+
+            int hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
+
+            if (!hit && (type == kPathArt || type == kRasterArt)) {
+                AIPathStyle st;
+                AIBoolean hasAdv = 0;
+                memset(&st, 0, sizeof(st));
+                if (N.style->GetPathStyle(art, &st, &hasAdv) == 0) {
+                    if (matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, &baseCtx)) hit = 1;
+                    if (!hit && matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, &baseCtx)) hit = 1;
                 }
             }
             if (!hit && matchFill && type == kRasterArt) {
@@ -1628,15 +1807,7 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
             }
 
             if (hit) {
-                /* 复合路径子路径命中时，直接选中其父复合路径 */
-                AIArtHandle targetSel = art;
-                AIArtHandle parent = NULL;
-                short ptype = 0;
-                if (type == kPathArt && N.art->GetArtParent(art, &parent) == 0 && parent &&
-                    N.art->GetArtType(parent, &ptype) == 0 && ptype == kCompoundPathArt) {
-                    targetSel = parent;
-                }
-                ArtVecPushUnique(&picked, targetSel);
+                ArtVecPushUnique(&picked, art);
             }
         }
     }

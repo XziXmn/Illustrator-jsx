@@ -192,7 +192,7 @@
       spot: spot,
       mode: mode,
       percent: pct,
-      tolerance: 0.05,
+      tolerance: 0.5,
       matchFill: matchFill,
       matchStroke: matchStroke
     }).then(function (data) {
