@@ -9,6 +9,6 @@
                 "sha256":  "ac54288484c75c5be0e304ccbf56ac75495f07fbb6a31a54722f29180e115e4d",
                 "minShell":  2
             },
-    "notes":  "修复专色选择漏选部分矢量对象（接入 AdjustObjectAIColors 支持可编辑文字、多外观填描、渐变/网格、混合/封套、符号、带专色剪切蒙版及 PDF/CDR 量化浓度容差）。",
+    "notes":  "修复部分矢量专色对象无法选中的问题。",
     "published":  "2026-11-26"
 }

@@ -10,6 +10,7 @@
 
   function setState(text, kind) {
     state.textContent = text;
+    state.title = text;
     state.hidden = !text;
     state.className = "hint update-state" + (kind ? " " + kind : "");
   }
@@ -38,14 +39,9 @@
         return;
       }
       release = data;
-      var notes = data.notes ? "：" + data.notes : "。";
-      if (data.canHot) {
-        setState("发现 v" + data.latestVersion + "（支持免重启热更新）" + notes, "ok");
-        setBusy(false, "热更新 v" + data.latestVersion);
-      } else {
-        setState("发现 v" + data.latestVersion + notes, "ok");
-        setBusy(false, "下载 v" + data.latestVersion);
-      }
+      var notes = data.notes ? " · " + data.notes : "";
+      setState("v" + data.latestVersion + notes, "ok");
+      setBusy(false, data.canHot ? ("热更新 v" + data.latestVersion) : ("下载 v" + data.latestVersion));
     }).catch(function (e) {
       setState(e.message, "err");
       setBusy(false, "检查更新");
