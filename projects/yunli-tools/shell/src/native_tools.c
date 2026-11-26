@@ -38,9 +38,13 @@ typedef void    *AIDocumentHandle;
 typedef void    *AIAppContextHandle;
 typedef void    *AICustomColorHandle;
 typedef void    *AIArtStyleHandle;
+typedef void    *AIStyleParser;
+typedef void    *AIParserPaintField;
 typedef void    *AIPatternHandle;
 typedef void    *AIGradientHandle;
 typedef void   **AIMdMemoryHandle;
+
+typedef struct { double pad[16]; } AIArtStylePaintDataBuf;
 
 typedef struct { void *fImpl; } UStr;
 typedef struct { void *fImpl; } AIColorSpaceObj;
@@ -287,6 +291,7 @@ enum {
 #define kArtSelected             0x00000001
 #define kArtLocked               0x00000002
 #define kArtHidden               0x00000004
+#define kArtFullySelected        0x00000008
 #define kArtIsClipMask           0x00001000
 #define kVisibleBounds           0x0000
 #define kNoStrokeBounds          0x0002
@@ -400,6 +405,23 @@ typedef struct {
 } AIArtStyleSuiteMin;
 
 typedef struct {
+    AIErr     (*NewParser)(AIStyleParser *parser);                                         /* 0 */
+    AIErr     (*DisposeParser)(AIStyleParser parser);                                      /* 1 */
+    AIErr     (*ParseStyle)(AIStyleParser parser, AIArtStyleHandle artStyle);              /* 2 */
+    void     *MergeStyleIntoParser;                                                        /* 3 */
+    AIBoolean (*IsStyleParseable)(AIStyleParser parser);                                   /* 4 */
+    void     *pad5_6[2];                                                                   /* 5..6 */
+    int32_t   (*CountPaintFields)(AIStyleParser parser);                                   /* 7 */
+    void     *pad8_10[3];                                                                  /* 8..10 */
+    AIErr     (*GetNthPaintField)(AIStyleParser parser, int32_t n, AIParserPaintField *pf);/* 11 */
+    void     *pad12_40[29];                                                                /* 12..40 */
+    AIBoolean (*IsFill)(AIParserPaintField pf);                                            /* 41 */
+    AIBoolean (*IsStroke)(AIParserPaintField pf);                                          /* 42 */
+    AIErr     (*GetFill)(AIParserPaintField pf, AIFillStyle *fill, void *paintData);       /* 43 */
+    AIErr     (*GetStroke)(AIParserPaintField pf, AIStrokeStyle *stroke, void *paintData); /* 44 */
+} AIArtStyleParserSuiteMin;
+
+typedef struct {
     AIErr (*GetSelectedArt)(AIArtHandle ***matches, int32_t *numMatches); /* 0 */
     AIErr (*GetMatchingArt)(AIMatchingArtSpec *specs, int16_t numSpecs, AIArtHandle ***matches, int32_t *numMatches); /* 1 */
     void *pad2_6[5];                                               /* 2..6 */
@@ -484,8 +506,9 @@ static struct {
     AIGroupSuiteMin       *group;
     AIColorSpaceSuiteMin  *cs;
     AICustomColorSuiteMin *cc;
-    AIBlendStyleSuiteMin  *blend;
-    AIArtStyleSuiteMin    *artStyle;
+    AIBlendStyleSuiteMin      *blend;
+    AIArtStyleSuiteMin        *artStyle;
+    AIArtStyleParserSuiteMin  *styleParser;
 } N;
 
 YUNLI_NATIVE_API void __cdecl YunLiNativeInit(void *basicSuite, void *pluginSelf, void *unicodeSuite, YunLiLogFn logFn)
@@ -532,6 +555,7 @@ static int EnsureSuites(void)
     N.cc    = (AICustomColorSuiteMin *)AcquireRange("AI Custom Color Suite", 8, 6);
     N.blend = (AIBlendStyleSuiteMin *) AcquireRange("AI Blend Style Suite", 5, 4);
     N.artStyle = (AIArtStyleSuiteMin *)AcquireRange("AI Art Style Suite", 8, 6);
+    N.styleParser = (AIArtStyleParserSuiteMin *)AcquireRange("AI Art Style Parser Suite", 9, 5);
     if (!N.doc || !N.art || !N.raster || !N.path || !N.style || !N.match || !N.mem || !N.layer || !N.group || !N.cc) {
         return 0;
     }
@@ -1412,6 +1436,30 @@ static void HandleSplitRun(const char *reqJson, StrBuf *out)
 
 /* ---------------- 命令 3 & 4: 专色百分比选区 ---------------- */
 
+static int ExtractSpotFromColor(const AIColor *col, const char *whereLabel,
+                                char *spotOut, int spotCap, double *pctOut, const char **whereOut)
+{
+    if (!col || col->kind != kCustomColor || !col->c.c.color) return 0;
+    AICustomColor cc;
+    memset(&cc, 0, sizeof(cc));
+    if (N.cc->GetCustomColor(col->c.c.color, &cc) != 0) return 0;
+    if (!(cc.flag & kCustomSpotColor) || (cc.flag & kCustomRegistrationColor)) return 0;
+    UStr uname = {0};
+    if (N.cc->GetCustomColorName(col->c.c.color, &uname) == 0) {
+        UStrToUtf8(&uname, spotOut, spotCap);
+        N.ustr->Destroy(&uname);
+        if (spotOut[0]) {
+            double pct = (1.0 - col->c.c.tint) * 100.0;
+            if (pct < 0.0) pct = 0.0;
+            if (pct > 100.0) pct = 100.0;
+            *pctOut = pct;
+            *whereOut = whereLabel;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int ExtractSpotFromPathStyle(const AIPathStyle *st, const AIPathStyleMap *map,
                                     char *spotOut, int spotCap, double *pctOut, const char **whereOut)
 {
@@ -1426,22 +1474,58 @@ static int ExtractSpotFromPathStyle(const AIPathStyle *st, const AIPathStyleMap 
         } else {
             if (!active || col->kind != kCustomColor || !col->c.c.color) continue;
         }
-        AICustomColor cc;
-        memset(&cc, 0, sizeof(cc));
-        if (N.cc->GetCustomColor(col->c.c.color, &cc) != 0) continue;
-        if (!(cc.flag & kCustomSpotColor) || (cc.flag & kCustomRegistrationColor)) continue;
-        UStr uname = {0};
-        if (N.cc->GetCustomColorName(col->c.c.color, &uname) == 0) {
-            UStrToUtf8(&uname, spotOut, spotCap);
-            N.ustr->Destroy(&uname);
-            if (spotOut[0]) {
-                double pct = (1.0 - col->c.c.tint) * 100.0;
-                if (pct < 0.0) pct = 0.0;
-                if (pct > 100.0) pct = 100.0;
-                *pctOut = pct;
-                *whereOut = (pass == 0) ? "fill" : "stroke";
-                return 1;
+        if (ExtractSpotFromColor(col, (pass == 0) ? "fill" : "stroke", spotOut, spotCap, pctOut, whereOut)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* 遍历 AIArtStyle 外观面板中的全部填充与描边层(覆盖 ActiveStyle / Stack / Conduit Filter) */
+static int ExtractSpotFromArtStyle(AIArtStyleHandle style,
+                                   char *spotOut, int spotCap, double *pctOut, const char **whereOut)
+{
+    if (!style) return 0;
+    if (N.styleParser && N.styleParser->NewParser && N.styleParser->ParseStyle &&
+        N.styleParser->CountPaintFields && N.styleParser->GetNthPaintField &&
+        N.styleParser->DisposeParser) {
+        AIStyleParser parser = NULL;
+        if (N.styleParser->NewParser(&parser) == 0 && parser) {
+            int found = 0;
+            if (N.styleParser->ParseStyle(parser, style) == 0 &&
+                (!N.styleParser->IsStyleParseable || N.styleParser->IsStyleParseable(parser))) {
+                int32_t cnt = N.styleParser->CountPaintFields(parser);
+                for (int32_t i = 0; i < cnt && !found; i++) {
+                    AIParserPaintField pf = NULL;
+                    if (N.styleParser->GetNthPaintField(parser, i, &pf) != 0 || !pf) continue;
+                    AIArtStylePaintDataBuf pd;
+                    memset(&pd, 0, sizeof(pd));
+                    if (N.styleParser->IsFill && N.styleParser->GetFill && N.styleParser->IsFill(pf)) {
+                        AIFillStyle fs;
+                        memset(&fs, 0, sizeof(fs));
+                        if (N.styleParser->GetFill(pf, &fs, &pd) == 0) {
+                            found = ExtractSpotFromColor(&fs.color, "fill", spotOut, spotCap, pctOut, whereOut);
+                        }
+                    } else if (N.styleParser->IsStroke && N.styleParser->GetStroke && N.styleParser->IsStroke(pf)) {
+                        AIStrokeStyle ss;
+                        memset(&ss, 0, sizeof(ss));
+                        if (N.styleParser->GetStroke(pf, &ss, &pd) == 0) {
+                            found = ExtractSpotFromColor(&ss.color, "stroke", spotOut, spotCap, pctOut, whereOut);
+                        }
+                    }
+                }
             }
+            N.styleParser->DisposeParser(parser);
+            if (found) return 1;
+        }
+    }
+    if (N.artStyle && N.artStyle->GetPaintAttributes) {
+        AIPathStyle st;
+        AIArtStylePaintDataBuf pd;
+        memset(&st, 0, sizeof(st));
+        memset(&pd, 0, sizeof(pd));
+        if (N.artStyle->GetPaintAttributes(style, &st, &pd) == 0) {
+            if (ExtractSpotFromPathStyle(&st, NULL, spotOut, spotCap, pctOut, whereOut)) return 1;
         }
     }
     return 0;
@@ -1458,26 +1542,12 @@ typedef struct {
 
 static void SpotInspectCallback(AIColor *color, void *userData, AIErr *result, AIBoolean *altered)
 {
+    (void)result;
     if (altered) *altered = 0;
     SpotInspectCtx *ctx = (SpotInspectCtx *)userData;
-    if (!ctx || ctx->found || !color || color->kind != kCustomColor || !color->c.c.color) return;
-    AICustomColor cc;
-    memset(&cc, 0, sizeof(cc));
-    if (N.cc->GetCustomColor(color->c.c.color, &cc) != 0) return;
-    if (!(cc.flag & kCustomSpotColor) || (cc.flag & kCustomRegistrationColor)) return;
-    UStr uname = {0};
-    if (N.cc->GetCustomColorName(color->c.c.color, &uname) == 0) {
-        UStrToUtf8(&uname, ctx->spotOut, ctx->spotCap);
-        N.ustr->Destroy(&uname);
-        if (ctx->spotOut[0]) {
-            double pct = (1.0 - color->c.c.tint) * 100.0;
-            if (pct < 0.0) pct = 0.0;
-            if (pct > 100.0) pct = 100.0;
-            *ctx->pctOut = pct;
-            *ctx->whereOut = ctx->label;
-            ctx->found = 1;
-            if (result) *result = kCanceledErr4cc;
-        }
+    if (!ctx || ctx->found) return;
+    if (ExtractSpotFromColor(color, ctx->label, ctx->spotOut, ctx->spotCap, ctx->pctOut, ctx->whereOut)) {
+        ctx->found = 1;
     }
 }
 
@@ -1485,6 +1555,15 @@ static int ExtractArtSpotSample(AIArtHandle art, char *spotOut, int spotCap, dou
 {
     short type = 0;
     if (N.art->GetArtType(art, &type) != 0) return 0;
+
+    /* 优先检查对象自身的外观样式(如带专色外观填充的编组) */
+    if (N.artStyle && N.artStyle->GetArtStyle) {
+        AIArtStyleHandle ownStyle = NULL;
+        if (N.artStyle->GetArtStyle(art, &ownStyle) == 0 && ownStyle) {
+            if (ExtractSpotFromArtStyle(ownStyle, spotOut, spotCap, pctOut, whereOut)) return 1;
+        }
+    }
+
     if (type == kGroupArt || type == kCompoundPathArt) {
         AIArtHandle ch = NULL;
         if (N.art->GetArtFirstChild(art, &ch) == 0) {
@@ -1495,7 +1574,7 @@ static int ExtractArtSpotSample(AIArtHandle art, char *spotOut, int spotCap, dou
                 ch = nx;
             }
         }
-        /* 兜底: 编组/复合路径本身的外观填充或描边 */
+        /* 兜底: 编组/复合路径外观中的渐变或效果专色 */
         if (N.style && N.style->AdjustObjectAIColors) {
             SpotInspectCtx ic = { spotOut, spotCap, pctOut, whereOut, "fill", 0 };
             N.style->AdjustObjectAIColors(art, SpotInspectCallback, &ic,
@@ -1659,12 +1738,12 @@ static int MatchColorSpot(const AIColor *color, const SpotMatchCtx *ctx)
 
 static void SpotMatchCallback(AIColor *color, void *userData, AIErr *result, AIBoolean *altered)
 {
+    (void)result;
     if (altered) *altered = 0;
     SpotMatchCtx *ctx = (SpotMatchCtx *)userData;
     if (!ctx || ctx->matched) return;
     if (MatchColorSpot(color, ctx)) {
         ctx->matched = 1;
-        if (result) *result = kCanceledErr4cc;
     }
 }
 
@@ -1678,6 +1757,112 @@ static int MatchArtByColors(AIArtHandle art, const SpotMatchCtx *baseCtx, int ma
     else if (!matchFill && matchStroke) flags |= kVisitColorsStrokesOnly;
     N.style->AdjustObjectAIColors(art, SpotMatchCallback, &ctx, flags, NULL);
     return ctx.matched;
+}
+
+static int MatchPathStyleDirect(AIArtHandle art, const SpotMatchCtx *ctx, int matchFill, int matchStroke)
+{
+    if (!N.style || !N.style->GetPathStyle) return 0;
+    AIPathStyle st;
+    AIBoolean hasAdv = 0;
+    memset(&st, 0, sizeof(st));
+    if (N.style->GetPathStyle(art, &st, &hasAdv) != 0) return 0;
+    if (matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, ctx)) return 1;
+    if (matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, ctx)) return 1;
+    return 0;
+}
+
+/* 遍历对象自身 AIArtStyle 的全部外观填充/描边层(支持 ActiveStyle / 多填多描 / Conduit Filter 编组) */
+static int MatchArtStylePaintFields(AIArtStyleHandle style, const SpotMatchCtx *ctx, int matchFill, int matchStroke)
+{
+    if (!style) return 0;
+    if (N.styleParser && N.styleParser->NewParser && N.styleParser->ParseStyle &&
+        N.styleParser->CountPaintFields && N.styleParser->GetNthPaintField &&
+        N.styleParser->DisposeParser) {
+        AIStyleParser parser = NULL;
+        if (N.styleParser->NewParser(&parser) == 0 && parser) {
+            int hit = 0;
+            if (N.styleParser->ParseStyle(parser, style) == 0 &&
+                (!N.styleParser->IsStyleParseable || N.styleParser->IsStyleParseable(parser))) {
+                int32_t cnt = N.styleParser->CountPaintFields(parser);
+                for (int32_t i = 0; i < cnt && !hit; i++) {
+                    AIParserPaintField pf = NULL;
+                    if (N.styleParser->GetNthPaintField(parser, i, &pf) != 0 || !pf) continue;
+                    AIArtStylePaintDataBuf pd;
+                    memset(&pd, 0, sizeof(pd));
+                    if (matchFill && N.styleParser->IsFill && N.styleParser->GetFill && N.styleParser->IsFill(pf)) {
+                        AIFillStyle fs;
+                        memset(&fs, 0, sizeof(fs));
+                        if (N.styleParser->GetFill(pf, &fs, &pd) == 0 && MatchColorSpot(&fs.color, ctx)) {
+                            hit = 1;
+                        }
+                    } else if (matchStroke && N.styleParser->IsStroke && N.styleParser->GetStroke && N.styleParser->IsStroke(pf)) {
+                        AIStrokeStyle ss;
+                        memset(&ss, 0, sizeof(ss));
+                        if (N.styleParser->GetStroke(pf, &ss, &pd) == 0 && MatchColorSpot(&ss.color, ctx)) {
+                            hit = 1;
+                        }
+                    }
+                }
+            }
+            N.styleParser->DisposeParser(parser);
+            if (hit) return 1;
+        }
+    }
+    if (N.artStyle && N.artStyle->GetPaintAttributes) {
+        AIPathStyle st;
+        AIArtStylePaintDataBuf pd;
+        memset(&st, 0, sizeof(st));
+        memset(&pd, 0, sizeof(pd));
+        if (N.artStyle->GetPaintAttributes(style, &st, &pd) == 0) {
+            if (matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, ctx)) return 1;
+            if (matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, ctx)) return 1;
+        }
+    }
+    return 0;
+}
+
+static int MatchArtOwnStyle(AIArtHandle art, const SpotMatchCtx *ctx, int matchFill, int matchStroke)
+{
+    if (!N.artStyle || !N.artStyle->GetArtStyle) return 0;
+    AIArtStyleHandle style = NULL;
+    if (N.artStyle->GetArtStyle(art, &style) != 0 || !style) return 0;
+    return MatchArtStylePaintFields(style, ctx, matchFill, matchStroke);
+}
+
+static int HasCompoundPathAncestor(AIArtHandle art)
+{
+    AIArtHandle cur = art;
+    while (cur) {
+        AIArtHandle par = NULL;
+        if (N.art->GetArtParent(cur, &par) != 0 || !par || par == cur) break;
+        short ptype = 0;
+        if (N.art->GetArtType(par, &ptype) == 0 && ptype == kCompoundPathArt) return 1;
+        cur = par;
+    }
+    return 0;
+}
+
+/* 递归检查复合路径下所有子路径(兼容复合路径内嵌套编组的结构) */
+static int MatchCompoundChildren(AIArtHandle container, const SpotMatchCtx *ctx, int matchFill, int matchStroke)
+{
+    AIArtHandle ch = NULL;
+    if (N.art->GetArtFirstChild(container, &ch) != 0) return 0;
+    while (ch) {
+        short t = 0;
+        if (N.art->GetArtType(ch, &t) == 0) {
+            if (t == kPathArt) {
+                if (MatchPathStyleDirect(ch, ctx, matchFill, matchStroke)) return 1;
+                if (MatchArtOwnStyle(ch, ctx, matchFill, matchStroke)) return 1;
+            } else if (t == kGroupArt || t == kCompoundPathArt) {
+                if (MatchArtOwnStyle(ch, ctx, matchFill, matchStroke)) return 1;
+                if (MatchCompoundChildren(ch, ctx, matchFill, matchStroke)) return 1;
+            }
+        }
+        AIArtHandle nx = NULL;
+        if (N.art->GetArtSibling(ch, &nx) != 0) break;
+        ch = nx;
+    }
+    return 0;
 }
 
 static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
@@ -1720,19 +1905,14 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
     }
     N.ustr->Destroy(&uSpot);
 
-    AIMatchingArtSpec specs[8];
-    specs[0].type = kPathArt;         specs[0].whichAttr = 0; specs[0].attr = 0;
-    specs[1].type = kCompoundPathArt; specs[1].whichAttr = 0; specs[1].attr = 0;
-    specs[2].type = kTextFrameArt;    specs[2].whichAttr = 0; specs[2].attr = 0;
-    specs[3].type = kRasterArt;       specs[3].whichAttr = 0; specs[3].attr = 0;
-    specs[4].type = kMeshArt;         specs[4].whichAttr = 0; specs[4].attr = 0;
-    specs[5].type = kPluginArt;       specs[5].whichAttr = 0; specs[5].attr = 0;
-    specs[6].type = kSymbolArt;       specs[6].whichAttr = 0; specs[6].attr = 0;
-    specs[7].type = kGroupArt;        specs[7].whichAttr = 0; specs[7].attr = 0;
+    AIMatchingArtSpec spec;
+    spec.type = kAnyArt;
+    spec.whichAttr = 0;
+    spec.attr = 0;
 
     AIArtHandle **all = NULL;
     int32_t allCount = 0;
-    if (N.match->GetMatchingArt(specs, 8, &all, &allCount) != 0) {
+    if (N.match->GetMatchingArt(&spec, 1, &all, &allCount) != 0) {
         SbAppend(out, "{\"ok\":false,\"error\":\"无法遍历文档对象。\"}");
         return;
     }
@@ -1754,56 +1934,51 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
             short type = 0;
             if (N.art->GetArtType(art, &type) != 0) continue;
 
+            /* 复合路径内部任何子对象交由最外层 kCompoundPathArt 统一匹配与选中 */
+            if (HasCompoundPathAncestor(art)) continue;
+
             if (type == kPathArt) {
                 AIBoolean isGuide = 0;
                 N.path->GetPathGuide(art, &isGuide);
                 if (isGuide) continue;
-                /* 复合路径子路径交由父 kCompoundPathArt 统一匹配与选中 */
-                AIArtHandle parent = NULL;
-                short ptype = 0;
-                if (N.art->GetArtParent(art, &parent) == 0 && parent &&
-                    N.art->GetArtType(parent, &ptype) == 0 && ptype == kCompoundPathArt) {
-                    continue;
-                }
             }
 
-            /* 编组仅在自身带有外观自定义专色时才匹配, 不因普通子对象命中而误选整组 */
+            /* 编组仅在自身外观面板(含多填充/多描边/ActiveStyle)命中目标专色时才选中, 绝不因普通子对象误选整组 */
             if (type == kGroupArt) {
-                if (!N.artStyle || !N.artStyle->GetArtStyle || !N.artStyle->ExamineStyle || !N.artStyle->GetPaintAttributes) {
-                    continue;
-                }
-                AIArtStyleHandle gStyle = NULL;
-                if (N.artStyle->GetArtStyle(art, &gStyle) != 0 || !gStyle) continue;
-                if (!(N.artStyle->ExamineStyle(gStyle, kStyleHasCustomColors) & kStyleHasCustomColors)) continue;
-                AIPathStyle st;
-                memset(&st, 0, sizeof(st));
-                if (N.artStyle->GetPaintAttributes(gStyle, &st, NULL) == 0) {
-                    if ((matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, &baseCtx)) ||
-                        (matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, &baseCtx))) {
-                        ArtVecPushUnique(&picked, art);
-                    }
+                AIArtHandle par = NULL;
+                if (N.art->GetArtParent(art, &par) != 0 || !par || par == art) continue; /* 跳过图层根组 */
+                if (MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke)) {
+                    ArtVecPushUnique(&picked, art);
                 }
                 continue;
             }
 
-            int hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
-
-            if (!hit && (type == kPathArt || type == kRasterArt)) {
-                AIPathStyle st;
-                AIBoolean hasAdv = 0;
-                memset(&st, 0, sizeof(st));
-                if (N.style->GetPathStyle(art, &st, &hasAdv) == 0) {
-                    if (matchFill && st.fillPaint && MatchColorSpot(&st.fill.color, &baseCtx)) hit = 1;
-                    if (!hit && matchStroke && st.strokePaint && MatchColorSpot(&st.stroke.color, &baseCtx)) hit = 1;
+            int hit = 0;
+            if (type == kPathArt) {
+                hit = MatchPathStyleDirect(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
+            } else if (type == kCompoundPathArt) {
+                hit = MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchPathStyleDirect(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchCompoundChildren(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
+            } else if (type == kRasterArt) {
+                hit = MatchPathStyleDirect(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
+                if (!hit && matchFill) {
+                    char rSpot[256];
+                    double rTint = 100.0;
+                    GetRasterSpotInfo(art, rSpot, sizeof(rSpot), &rTint);
+                    if (rSpot[0] && strcmp(rSpot, spotName) == 0 && MatchPercent(rTint, targetPct, mode, tol)) {
+                        hit = 1;
+                    }
                 }
-            }
-            if (!hit && matchFill && type == kRasterArt) {
-                char rSpot[256];
-                double rTint = 100.0;
-                GetRasterSpotInfo(art, rSpot, sizeof(rSpot), &rTint);
-                if (rSpot[0] && strcmp(rSpot, spotName) == 0 && MatchPercent(rTint, targetPct, mode, tol)) {
-                    hit = 1;
-                }
+            } else if (type == kTextFrameArt || type == kMeshArt || type == kPluginArt ||
+                       type == kSymbolArt || type == kPlacedArt || type >= 14) {
+                hit = MatchArtOwnStyle(art, &baseCtx, matchFill, matchStroke);
+                if (!hit) hit = MatchArtByColors(art, &baseCtx, matchFill, matchStroke);
             }
 
             if (hit) {
@@ -1815,7 +1990,7 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
 
     N.match->DeselectAll();
     for (int i = 0; i < picked.count; i++) {
-        N.art->SetArtUserAttr(picked.items[i], kArtSelected, kArtSelected);
+        N.art->SetArtUserAttr(picked.items[i], kArtSelected | kArtFullySelected, kArtSelected | kArtFullySelected);
     }
     N.doc->RedrawDocument();
 

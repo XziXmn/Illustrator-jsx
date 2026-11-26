@@ -1,14 +1,14 @@
 {
-    "version":  "0.4.1",
-    "tag":  "yunli-v0.4.1",
+    "version":  "0.4.2",
+    "tag":  "yunli-v0.4.2",
     "asset":  "YunLiTools.aip",
-    "sha256":  "1c0c1100470ca17ec5fe99032d3c5ab3f7aa3f07232e7f95cb4c5fb40fe3e4a6",
+    "sha256":  "3aa4ad546194237876a5f86f867779cfe5eafac8ba49daf41c123f4d9c211a18",
     "shellVersion":  2,
     "hot":  {
-                "asset":  "YunLiHot-0.4.1.zip",
-                "sha256":  "ac54288484c75c5be0e304ccbf56ac75495f07fbb6a31a54722f29180e115e4d",
+                "asset":  "YunLiHot-0.4.2.zip",
+                "sha256":  "ea0d55ea728b668db76d0e3ef3e653336099803543698d057bfa13e83ee5ee66",
                 "minShell":  2
             },
-    "notes":  "修复部分矢量专色对象无法选中的问题。",
+    "notes":  "修复编组外观与复合路径专色漏选，检查更新提示自动隐藏。",
     "published":  "2026-11-26"
 }

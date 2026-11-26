@@ -7,12 +7,23 @@
 
   var release = null;
   var busy = false;
+  var hideTimer = null;
 
-  function setState(text, kind) {
+  function setState(text, kind, autoHideMs) {
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
     state.textContent = text;
     state.title = text;
     state.hidden = !text;
     state.className = "hint update-state" + (kind ? " " + kind : "");
+    if (text && autoHideMs > 0) {
+      hideTimer = setTimeout(function () {
+        hideTimer = null;
+        setState("", "");
+      }, autoHideMs);
+    }
   }
   function setBusy(on, label) {
     busy = on;
@@ -34,7 +45,7 @@
     YunLiTool.request("updateCheck").then(function (data) {
       if (!data.newer) {
         release = null;
-        setState("已是最新（v" + data.currentVersion + "）。", "");
+        setState("已是最新（v" + data.currentVersion + "）。", "", 3500);
         setBusy(false, "检查更新");
         return;
       }
@@ -43,7 +54,7 @@
       setState("v" + data.latestVersion + notes, "ok");
       setBusy(false, data.canHot ? ("热更新 v" + data.latestVersion) : ("下载 v" + data.latestVersion));
     }).catch(function (e) {
-      setState(e.message, "err");
+      setState(e.message, "err", 6000);
       setBusy(false, "检查更新");
     });
   });
