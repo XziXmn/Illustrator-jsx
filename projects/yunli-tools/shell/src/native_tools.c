@@ -292,7 +292,10 @@ enum {
 #define kArtLocked               0x00000002
 #define kArtHidden               0x00000004
 #define kArtFullySelected        0x00000008
+#define kArtSelectedTopLevelGroups 0x00000040
 #define kArtIsClipMask           0x00001000
+#define kFirstBeforeSecond       1
+#define kFirstAfterSecond        2
 #define kVisibleBounds           0x0000
 #define kNoStrokeBounds          0x0002
 #define kExcludeGuideBounds      0x0040
@@ -349,7 +352,9 @@ typedef struct {
     AIErr (*SetArtBounds)(AIArtHandle art);                        /* 14 */
     void *pad15_16[2];                                             /* 15..16 */
     AIErr (*GetArtTransformBounds)(AIArtHandle art, AIRealMatrix *xform, int32_t flags, AIRealRect *bounds); /* 17 */
-    void *pad18_34[17];                                            /* 18..34 */
+    void *pad18_19[2];                                             /* 18..19 */
+    AIErr (*GetArtOrder)(AIArtHandle art1, AIArtHandle art2, short *order); /* 20 */
+    void *pad21_34[14];                                            /* 21..34 */
     AIErr (*SetArtName)(AIArtHandle art, const UStr *name);        /* 35 */
     void *pad36_41[6];                                             /* 36..41 */
     AIErr (*TransferAttributes)(AIArtHandle src, AIArtHandle dst, uint32_t which); /* 42 */
@@ -397,7 +402,9 @@ typedef struct {
 typedef struct {
     AIErr    (*GetStyledArt)(AIArtHandle art, AIArtHandle *styledArt);                     /* 0 */
     AIErr    (*GetArtStyle)(AIArtHandle art, AIArtStyleHandle *artStyle);                  /* 1 */
-    void    *pad2_10[9];                                                                   /* 2..10 */
+    void    *pad2_5[4];                                                                    /* 2..5 */
+    AIErr    (*SetArtStyle)(AIArtHandle art, AIArtStyleHandle artStyle);                   /* 6 */
+    void    *pad7_10[4];                                                                   /* 7..10 */
     AIErr    (*GetPaintAttributes)(AIArtStyleHandle artStyle, AIPathStyle *style,
                                    void *paintData);                                       /* 11 */
     void    *pad12_32[21];                                                                 /* 12..32 */
@@ -2040,6 +2047,646 @@ static void HandleSpotSelectRun(const char *reqJson, StrBuf *out)
     ArtVecFree(&picked);
 }
 
+/* ---------------- 命令 5 & 6: 批量蒙版 (按刀线覆盖范围原位建立剪切蒙版) ---------------- */
+
+static int ArtStyleHasVisibleFill(AIArtStyleHandle style)
+{
+    if (!style) return 0;
+    if (N.styleParser && N.styleParser->NewParser && N.styleParser->ParseStyle &&
+        N.styleParser->CountPaintFields && N.styleParser->GetNthPaintField &&
+        N.styleParser->DisposeParser) {
+        AIStyleParser parser = NULL;
+        if (N.styleParser->NewParser(&parser) == 0 && parser) {
+            int hasFill = 0;
+            if (N.styleParser->ParseStyle(parser, style) == 0 &&
+                (!N.styleParser->IsStyleParseable || N.styleParser->IsStyleParseable(parser))) {
+                int32_t cnt = N.styleParser->CountPaintFields(parser);
+                for (int32_t i = 0; i < cnt && !hasFill; i++) {
+                    AIParserPaintField pf = NULL;
+                    if (N.styleParser->GetNthPaintField(parser, i, &pf) != 0 || !pf) continue;
+                    if (N.styleParser->IsFill && N.styleParser->GetFill && N.styleParser->IsFill(pf)) {
+                        AIFillStyle fs;
+                        AIArtStylePaintDataBuf pd;
+                        memset(&fs, 0, sizeof(fs));
+                        memset(&pd, 0, sizeof(pd));
+                        if (N.styleParser->GetFill(pf, &fs, &pd) == 0 && fs.color.kind != kNoneColor) {
+                            hasFill = 1;
+                        }
+                    }
+                }
+            }
+            N.styleParser->DisposeParser(parser);
+            return hasFill;
+        }
+    }
+    if (N.artStyle && N.artStyle->GetPaintAttributes) {
+        AIPathStyle st;
+        AIArtStylePaintDataBuf pd;
+        memset(&st, 0, sizeof(st));
+        memset(&pd, 0, sizeof(pd));
+        if (N.artStyle->GetPaintAttributes(style, &st, &pd) == 0) {
+            if (st.fillPaint && st.fill.color.kind != kNoneColor) return 1;
+        }
+    }
+    return 0;
+}
+
+static int PathOrCompoundHasFill(AIArtHandle art)
+{
+    if (!art) return 0;
+    if (N.artStyle && N.artStyle->GetArtStyle) {
+        AIArtStyleHandle own = NULL;
+        if (N.artStyle->GetArtStyle(art, &own) == 0 && own && ArtStyleHasVisibleFill(own)) return 1;
+    }
+    short type = 0;
+    if (N.art->GetArtType(art, &type) != 0) return 0;
+    if (type == kPathArt) {
+        AIPathStyle st;
+        AIBoolean hasAdv = 0;
+        memset(&st, 0, sizeof(st));
+        if (N.style->GetPathStyle(art, &st, &hasAdv) == 0 && st.fillPaint && st.fill.color.kind != kNoneColor) {
+            return 1;
+        }
+        return 0;
+    }
+    if (type == kCompoundPathArt || type == kGroupArt) {
+        AIArtHandle ch = NULL;
+        if (N.art->GetArtFirstChild(art, &ch) == 0) {
+            while (ch) {
+                if (PathOrCompoundHasFill(ch)) return 1;
+                AIArtHandle nx = NULL;
+                if (N.art->GetArtSibling(ch, &nx) != 0) break;
+                ch = nx;
+            }
+        }
+    }
+    return 0;
+}
+
+static int CompoundHasClosedPath(AIArtHandle art)
+{
+    AIArtHandle ch = NULL;
+    if (N.art->GetArtFirstChild(art, &ch) != 0) return 0;
+    while (ch) {
+        short t = 0;
+        if (N.art->GetArtType(ch, &t) == 0) {
+            if (t == kPathArt) {
+                AIBoolean closed = 0, isGuide = 0;
+                N.path->GetPathGuide(ch, &isGuide);
+                N.path->GetPathClosed(ch, &closed);
+                if (!isGuide && closed) return 1;
+            } else if (t == kGroupArt || t == kCompoundPathArt) {
+                if (CompoundHasClosedPath(ch)) return 1;
+            }
+        }
+        AIArtHandle nx = NULL;
+        if (N.art->GetArtSibling(ch, &nx) != 0) break;
+        ch = nx;
+    }
+    return 0;
+}
+
+static int GetArtVisualBounds(AIArtHandle art, AIRealRect *out)
+{
+    memset(out, 0, sizeof(*out));
+    if (!art) return 0;
+    if (N.art->GetArtTransformBounds(art, NULL, kVisibleBounds | kNoStrokeBounds, out) == 0) {
+        return 1;
+    }
+    return (N.art->GetArtBounds(art, out) == 0);
+}
+
+static int IsClosedDieCutShape(AIArtHandle art, int requireNoFill)
+{
+    if (!art || !IsArtVisibleAndUnlocked(art)) return 0;
+    int32_t attr = 0;
+    if (N.art->GetArtUserAttr(art, kArtIsClipMask, &attr) == 0 && (attr & kArtIsClipMask)) return 0;
+
+    short type = 0;
+    if (N.art->GetArtType(art, &type) != 0) return 0;
+    if (type == kPathArt) {
+        AIBoolean isGuide = 0, closed = 0;
+        N.path->GetPathGuide(art, &isGuide);
+        N.path->GetPathClosed(art, &closed);
+        if (isGuide || !closed) return 0;
+    } else if (type == kCompoundPathArt) {
+        if (!CompoundHasClosedPath(art)) return 0;
+    } else {
+        return 0;
+    }
+
+    AIRealRect rb;
+    if (!GetArtVisualBounds(art, &rb)) return 0;
+    if ((rb.right - rb.left) <= 0.5 || (rb.top - rb.bottom) <= 0.5) return 0;
+
+    if (requireNoFill && PathOrCompoundHasFill(art)) return 0;
+    return 1;
+}
+
+/* 判断编组是否为纯刀线编组(非剪切组, 至少含 1 条刀线且所有非参考线叶子均为闭合刀线) */
+static int IsPureDieCutGroupRec(AIArtHandle grp, int requireNoFill, int *foundCount)
+{
+    if (!grp || !IsArtVisibleAndUnlocked(grp)) return 0;
+    short type = 0;
+    if (N.art->GetArtType(grp, &type) != 0 || type != kGroupArt) return 0;
+    AIBoolean clipped = 0;
+    if (N.group->GetGroupClipped(grp, &clipped) == 0 && clipped) return 0;
+    if (requireNoFill && N.artStyle && N.artStyle->GetArtStyle) {
+        AIArtStyleHandle own = NULL;
+        if (N.artStyle->GetArtStyle(grp, &own) == 0 && own && ArtStyleHasVisibleFill(own)) return 0;
+    }
+    AIArtHandle ch = NULL;
+    if (N.art->GetArtFirstChild(grp, &ch) != 0 || !ch) return 0;
+    while (ch) {
+        short ct = 0;
+        if (N.art->GetArtType(ch, &ct) == 0) {
+            if (ct == kPathArt) {
+                AIBoolean isGuide = 0;
+                N.path->GetPathGuide(ch, &isGuide);
+                if (!isGuide) {
+                    if (!IsClosedDieCutShape(ch, requireNoFill)) return 0;
+                    (*foundCount)++;
+                }
+            } else if (ct == kCompoundPathArt) {
+                if (!IsClosedDieCutShape(ch, requireNoFill)) return 0;
+                (*foundCount)++;
+            } else if (ct == kGroupArt) {
+                if (!IsPureDieCutGroupRec(ch, requireNoFill, foundCount)) return 0;
+            } else {
+                return 0;
+            }
+        }
+        AIArtHandle nx = NULL;
+        if (N.art->GetArtSibling(ch, &nx) != 0) break;
+        ch = nx;
+    }
+    return (*foundCount) > 0;
+}
+
+static int IsPureDieCutGroup(AIArtHandle grp, int requireNoFill)
+{
+    int found = 0;
+    return IsPureDieCutGroupRec(grp, requireNoFill, &found);
+}
+
+static void ExtractDieCutsFromContainer(AIArtHandle art, int requireNoFill, ArtVec *dieCuts)
+{
+    if (!art) return;
+    short type = 0;
+    if (N.art->GetArtType(art, &type) != 0) return;
+    if (type == kPathArt || type == kCompoundPathArt) {
+        if (IsClosedDieCutShape(art, requireNoFill)) {
+            ArtVecPushUnique(dieCuts, art);
+        }
+        return;
+    }
+    if (type == kGroupArt) {
+        AIArtHandle ch = NULL;
+        if (N.art->GetArtFirstChild(art, &ch) == 0) {
+            while (ch) {
+                ExtractDieCutsFromContainer(ch, requireNoFill, dieCuts);
+                AIArtHandle nx = NULL;
+                if (N.art->GetArtSibling(ch, &nx) != 0) break;
+                ch = nx;
+            }
+        }
+    }
+}
+
+/* 按文档真实渲染堆叠顺序排序(从最顶层到最底层), 严格保持遮挡层级 */
+static void SortArtsByPaintOrder(ArtVec *vec)
+{
+    if (!vec || vec->count <= 1 || !N.art->GetArtOrder) return;
+    for (int i = 1; i < vec->count; i++) {
+        AIArtHandle key = vec->items[i];
+        int j = i - 1;
+        while (j >= 0) {
+            short ord = 0;
+            if (N.art->GetArtOrder(key, vec->items[j], &ord) == 0 && ord == kFirstBeforeSecond) {
+                vec->items[j + 1] = vec->items[j];
+                j--;
+            } else {
+                break;
+            }
+        }
+        vec->items[j + 1] = key;
+    }
+}
+
+static int HasAncestorInVec(AIArtHandle art, const ArtVec *set)
+{
+    AIArtHandle cur = art;
+    while (cur) {
+        AIArtHandle par = NULL;
+        if (N.art->GetArtParent(cur, &par) != 0 || !par || par == cur) break;
+        if (ArtVecContains(set, par)) return 1;
+        cur = par;
+    }
+    return 0;
+}
+
+static void CollectTopSelectedArts(ArtVec *out)
+{
+    AIArtHandle **matches = NULL;
+    int32_t num = 0;
+
+    AIMatchingArtSpec spec;
+    spec.type = kAnyArt;
+    spec.whichAttr = kArtSelectedTopLevelGroups;
+    spec.attr = kArtSelectedTopLevelGroups;
+    if (N.match->GetMatchingArt(&spec, 1, &matches, &num) == 0 && matches && num > 0) {
+        for (int32_t i = 0; i < num; i++) {
+            AIArtHandle h = (*matches)[i];
+            if (!h || !IsArtVisibleAndUnlocked(h)) continue;
+            AIArtHandle par = NULL;
+            if (N.art->GetArtParent(h, &par) != 0 || !par || par == h) continue; /* 跳过图层根组 */
+            short t = 0;
+            if (N.art->GetArtType(h, &t) == 0 && t == kPathArt) {
+                AIBoolean isGuide = 0;
+                N.path->GetPathGuide(h, &isGuide);
+                if (isGuide) continue;
+            }
+            ArtVecPushUnique(out, h);
+        }
+        N.mem->MdMemoryDisposeHandle((AIMdMemoryHandle)matches);
+    } else {
+        if (matches) N.mem->MdMemoryDisposeHandle((AIMdMemoryHandle)matches);
+        matches = NULL;
+        num = 0;
+        if (N.match->GetSelectedArt(&matches, &num) == 0 && matches && num > 0) {
+            ArtVec raw = {0};
+            for (int32_t i = 0; i < num; i++) {
+                AIArtHandle h = (*matches)[i];
+                if (!h || !IsArtVisibleAndUnlocked(h)) continue;
+                AIArtHandle par = NULL;
+                if (N.art->GetArtParent(h, &par) != 0 || !par || par == h) continue;
+                ArtVecPushUnique(&raw, h);
+            }
+            for (int i = 0; i < raw.count; i++) {
+                AIArtHandle h = raw.items[i];
+                if (HasAncestorInVec(h, &raw)) continue;
+                short t = 0;
+                if (N.art->GetArtType(h, &t) == 0 && t == kPathArt) {
+                    AIBoolean isGuide = 0;
+                    N.path->GetPathGuide(h, &isGuide);
+                    if (isGuide) continue;
+                }
+                ArtVecPushUnique(out, h);
+            }
+            ArtVecFree(&raw);
+        }
+        if (matches) N.mem->MdMemoryDisposeHandle((AIMdMemoryHandle)matches);
+    }
+
+    SortArtsByPaintOrder(out);
+}
+
+static void PartitionDieCutsAndContents(const ArtVec *topSel, const char *detectMode,
+                                        ArtVec *dieCuts, ArtVec *dieCutGroups, ArtVec *contents,
+                                        const char **usedModeOut)
+{
+    int forceTop = (detectMode && strcmp(detectMode, "top") == 0);
+    *usedModeOut = forceTop ? "top" : "nofill";
+
+    if (!forceTop) {
+        for (int i = 0; i < topSel->count; i++) {
+            AIArtHandle h = topSel->items[i];
+            if (IsClosedDieCutShape(h, 1)) {
+                ArtVecPushUnique(dieCuts, h);
+            } else if (IsPureDieCutGroup(h, 1)) {
+                ArtVecPushUnique(dieCutGroups, h);
+                ExtractDieCutsFromContainer(h, 1, dieCuts);
+            } else {
+                ArtVecPushUnique(contents, h);
+            }
+        }
+        if (dieCuts->count > 0) return;
+        /* 若未找到无填充刀线且至少选中 2 个对象, 自动兜底将最顶层闭合对象或刀线组识别为刀线 */
+        ArtVecFree(dieCuts);
+        ArtVecFree(dieCutGroups);
+        ArtVecFree(contents);
+    }
+
+    if (topSel->count >= 2) {
+        AIArtHandle top = topSel->items[0];
+        if (IsClosedDieCutShape(top, 0)) {
+            *usedModeOut = "top";
+            ArtVecPushUnique(dieCuts, top);
+            for (int i = 1; i < topSel->count; i++) ArtVecPushUnique(contents, topSel->items[i]);
+            return;
+        }
+        if (IsPureDieCutGroup(top, 0)) {
+            *usedModeOut = "top";
+            ArtVecPushUnique(dieCutGroups, top);
+            ExtractDieCutsFromContainer(top, 0, dieCuts);
+            for (int i = 1; i < topSel->count; i++) ArtVecPushUnique(contents, topSel->items[i]);
+            return;
+        }
+    }
+
+    /* 兜底无法区分时全部归入 contents 以便前端给出清晰提示 */
+    for (int i = 0; i < topSel->count; i++) ArtVecPushUnique(contents, topSel->items[i]);
+}
+
+static AIRealRect ExpandRectByPt(const AIRealRect *r, double tolPt)
+{
+    AIRealRect out = *r;
+    out.left   -= tolPt;
+    out.right  += tolPt;
+    out.top    += tolPt;
+    out.bottom -= tolPt;
+    if (out.left > out.right) {
+        double mid = 0.5 * (r->left + r->right);
+        out.left = out.right = mid;
+    }
+    if (out.bottom > out.top) {
+        double mid = 0.5 * (r->bottom + r->top);
+        out.bottom = out.top = mid;
+    }
+    return out;
+}
+
+static void ClearArtPaintForMask(AIArtHandle art, const AIPathStyle *emptyStyle)
+{
+    if (!art) return;
+    if (N.artStyle && N.artStyle->SetArtStyle) {
+        N.artStyle->SetArtStyle(art, NULL);
+    }
+    short type = 0;
+    if (N.art->GetArtType(art, &type) != 0) return;
+    if (type == kPathArt) {
+        N.style->SetPathStyle(art, emptyStyle);
+    } else if (type == kCompoundPathArt || type == kGroupArt) {
+        AIArtHandle ch = NULL;
+        if (N.art->GetArtFirstChild(art, &ch) == 0) {
+            while (ch) {
+                ClearArtPaintForMask(ch, emptyStyle);
+                AIArtHandle nx = NULL;
+                if (N.art->GetArtSibling(ch, &nx) != 0) break;
+                ch = nx;
+            }
+        }
+    }
+}
+
+/* 递归清理搬空后的原刀线编组, 非空组保留不动 */
+static void DisposeIfEmptyGroup(AIArtHandle grp)
+{
+    if (!grp) return;
+    short type = 0;
+    if (N.art->GetArtType(grp, &type) != 0 || type != kGroupArt) return;
+    AIArtHandle ch = NULL;
+    if (N.art->GetArtFirstChild(grp, &ch) == 0) {
+        while (ch) {
+            AIArtHandle nx = NULL;
+            N.art->GetArtSibling(ch, &nx);
+            short ct = 0;
+            if (N.art->GetArtType(ch, &ct) == 0 && ct == kGroupArt) {
+                DisposeIfEmptyGroup(ch);
+            }
+            ch = nx;
+        }
+    }
+    ch = NULL;
+    if (N.art->GetArtFirstChild(grp, &ch) != 0 || !ch) {
+        N.art->DisposeArt(grp);
+    }
+}
+
+static void HandleBatchMaskInspect(const char *reqJson, StrBuf *out)
+{
+    AIDocumentHandle docH = NULL;
+    if (N.doc->GetDocument(&docH) != 0 || !docH) {
+        SbAppend(out, "{\"ok\":false,\"error\":\"请先打开文档。\"}");
+        return;
+    }
+
+    char detectMode[32] = "auto";
+    JsonGetStr(reqJson, "detectMode", detectMode, sizeof(detectMode));
+    double tolMm = JsonGetNum(reqJson, "toleranceMm", 0.0);
+    if (tolMm < -50.0) tolMm = -50.0;
+    if (tolMm > 50.0)  tolMm = 50.0;
+    double tolPt = tolMm * (72.0 / 25.4);
+
+    ArtVec topSel = {0}, dieCuts = {0}, dieCutGroups = {0}, contents = {0};
+    CollectTopSelectedArts(&topSel);
+    const char *usedMode = "nofill";
+    PartitionDieCutsAndContents(&topSel, detectMode, &dieCuts, &dieCutGroups, &contents, &usedMode);
+
+    int matchedDieCuts = 0;
+    int sharedContents = 0;
+    if (dieCuts.count > 0 && contents.count > 0) {
+        AIRealRect *cBoxes = (AIRealRect *)calloc((size_t)contents.count, sizeof(AIRealRect));
+        int *cValid        = (int *)calloc((size_t)contents.count, sizeof(int));
+        int *hitCount      = (int *)calloc((size_t)contents.count, sizeof(int));
+        if (cBoxes && cValid && hitCount) {
+            for (int j = 0; j < contents.count; j++) {
+                cValid[j] = GetArtVisualBounds(contents.items[j], &cBoxes[j]);
+            }
+            for (int d = 0; d < dieCuts.count; d++) {
+                AIRealRect dBox;
+                if (!GetArtVisualBounds(dieCuts.items[d], &dBox)) continue;
+                AIRealRect testBox = ExpandRectByPt(&dBox, tolPt);
+                int hits = 0;
+                for (int j = 0; j < contents.count; j++) {
+                    if (!cValid[j]) continue;
+                    if (RectsIntersect(&cBoxes[j], &testBox)) {
+                        hitCount[j]++;
+                        hits++;
+                    }
+                }
+                if (hits > 0) matchedDieCuts++;
+            }
+            for (int j = 0; j < contents.count; j++) {
+                if (hitCount[j] > 1) sharedContents++;
+            }
+        }
+        free(cBoxes);
+        free(cValid);
+        free(hitCount);
+    }
+
+    SbAppend(out, "{\"ok\":true,\"data\":{");
+    SbAppendFmt(out, "\"dieCutCount\":%d,\"contentCount\":%d,\"matchedDieCuts\":%d,\"sharedContents\":%d,\"usedMode\":",
+        dieCuts.count, contents.count, matchedDieCuts, sharedContents);
+    SbAppendJsonStr(out, usedMode);
+    SbAppend(out, "}}");
+
+    ArtVecFree(&topSel);
+    ArtVecFree(&dieCuts);
+    ArtVecFree(&dieCutGroups);
+    ArtVecFree(&contents);
+}
+
+static void HandleBatchMaskRun(const char *reqJson, StrBuf *out)
+{
+    DWORD t0 = GetTickCount();
+    AIDocumentHandle docH = NULL;
+    if (N.doc->GetDocument(&docH) != 0 || !docH) {
+        SbAppend(out, "{\"ok\":false,\"error\":\"请先打开文档。\"}");
+        return;
+    }
+
+    char detectMode[32] = "auto";
+    JsonGetStr(reqJson, "detectMode", detectMode, sizeof(detectMode));
+    double tolMm  = JsonGetNum(reqJson, "toleranceMm", 0.0);
+    int skipEmpty = JsonGetBool(reqJson, "skipEmpty", 1);
+    if (tolMm < -50.0) tolMm = -50.0;
+    if (tolMm > 50.0)  tolMm = 50.0;
+    double tolPt = tolMm * (72.0 / 25.4);
+
+    ArtVec topSel = {0}, dieCuts = {0}, dieCutGroups = {0}, contents = {0};
+    CollectTopSelectedArts(&topSel);
+    const char *usedMode = "nofill";
+    PartitionDieCutsAndContents(&topSel, detectMode, &dieCuts, &dieCutGroups, &contents, &usedMode);
+
+    if (dieCuts.count == 0) {
+        SbAppend(out, "{\"ok\":false,\"error\":\"未识别到闭合刀线，请同时选中刀线和要蒙版的对象。\"}");
+        ArtVecFree(&topSel); ArtVecFree(&dieCuts); ArtVecFree(&dieCutGroups); ArtVecFree(&contents);
+        return;
+    }
+    if (contents.count == 0) {
+        SbAppend(out, "{\"ok\":false,\"error\":\"未找到需要被蒙版的内容对象，请同时选中刀线和内容对象。\"}");
+        ArtVecFree(&topSel); ArtVecFree(&dieCuts); ArtVecFree(&dieCutGroups); ArtVecFree(&contents);
+        return;
+    }
+
+    int D = dieCuts.count;
+    int C = contents.count;
+    AIRealRect *cBoxes = (AIRealRect *)calloc((size_t)C, sizeof(AIRealRect));
+    int *cValid        = (int *)calloc((size_t)C, sizeof(int));
+    int *hitCount      = (int *)calloc((size_t)C, sizeof(int));
+    int *usedCount     = (int *)calloc((size_t)C, sizeof(int));
+    unsigned char *mat = (unsigned char *)calloc((size_t)D * (size_t)C, 1);
+    int *dieHits       = (int *)calloc((size_t)D, sizeof(int));
+    if (!cBoxes || !cValid || !hitCount || !usedCount || !mat || !dieHits) {
+        free(cBoxes); free(cValid); free(hitCount); free(usedCount); free(mat); free(dieHits);
+        ArtVecFree(&topSel); ArtVecFree(&dieCuts); ArtVecFree(&dieCutGroups); ArtVecFree(&contents);
+        SbAppend(out, "{\"ok\":false,\"error\":\"内存不足。\"}");
+        return;
+    }
+
+    for (int j = 0; j < C; j++) {
+        cValid[j] = GetArtVisualBounds(contents.items[j], &cBoxes[j]);
+    }
+    for (int d = 0; d < D; d++) {
+        AIRealRect dBox;
+        if (!GetArtVisualBounds(dieCuts.items[d], &dBox)) continue;
+        AIRealRect testBox = ExpandRectByPt(&dBox, tolPt);
+        for (int j = 0; j < C; j++) {
+            if (!cValid[j]) continue;
+            if (RectsIntersect(&cBoxes[j], &testBox)) {
+                mat[(size_t)d * (size_t)C + (size_t)j] = 1;
+                hitCount[j]++;
+                dieHits[d]++;
+            }
+        }
+    }
+
+    /* 设置 Undo 文案, 支持一次 Ctrl+Z 完整撤销 */
+    if (N.undo) {
+        UStr uUndo = {0}, uRedo = {0};
+        if (Utf8ToUStr("撤销批量蒙版", &uUndo) && Utf8ToUStr("重做批量蒙版", &uRedo)) {
+            N.undo->SetUndoTextUS(&uUndo, &uRedo);
+        }
+        if (uUndo.fImpl) N.ustr->Destroy(&uUndo);
+        if (uRedo.fImpl) N.ustr->Destroy(&uRedo);
+    }
+
+    AIPathStyle emptyStyle;
+    memset(&emptyStyle, 0, sizeof(emptyStyle));
+    emptyStyle.fillPaint = 0;
+    emptyStyle.strokePaint = 0;
+    emptyStyle.fill.color.kind = kNoneColor;
+    emptyStyle.stroke.color.kind = kNoneColor;
+    emptyStyle.resolution = 800.0;
+
+    ArtVec createdGroups = {0};
+    int created = 0, skipped = 0, duplicated = 0, maskedItems = 0;
+    AIErr lastErr = 0;
+
+    for (int d = 0; d < D; d++) {
+        if (dieHits[d] == 0 && skipEmpty) {
+            skipped++;
+            continue;
+        }
+
+        AIArtHandle dieCut = dieCuts.items[d];
+        /* 原位锚点: 优先建在首个命中内容对象的正上方, 保留在内容原图层与堆叠位; 空刀线则建在原刀线上方 */
+        AIArtHandle anchor = dieCut;
+        for (int j = 0; j < C; j++) {
+            if (mat[(size_t)d * (size_t)C + (size_t)j]) {
+                anchor = contents.items[j];
+                break;
+            }
+        }
+
+        AIArtHandle grp = NULL;
+        lastErr = N.art->NewArt(kGroupArt, kPlaceAbove, anchor, &grp);
+        if (lastErr != 0 || !grp) break;
+
+        /* 按原始堆叠顺序(从顶到底)依次放入剪切组底部, 100% 保持原图层前后关系 */
+        for (int j = 0; j < C; j++) {
+            if (!mat[(size_t)d * (size_t)C + (size_t)j]) continue;
+            AIArtHandle obj = contents.items[j];
+            usedCount[j]++;
+            if (usedCount[j] < hitCount[j]) {
+                AIArtHandle dup = NULL;
+                if (N.art->DuplicateArt(obj, kPlaceInsideOnBottom, grp, &dup) == 0 && dup) {
+                    duplicated++;
+                    maskedItems++;
+                }
+            } else {
+                if (N.art->ReorderArt(obj, kPlaceInsideOnBottom, grp) == 0) {
+                    maskedItems++;
+                }
+            }
+        }
+
+        /* 直接用原刀线作为剪切蒙版路径(置于剪切组最顶层、清除填描、先设剪切组再设 kArtIsClipMask) */
+        N.art->ReorderArt(dieCut, kPlaceInsideOnTop, grp);
+        ClearArtPaintForMask(dieCut, &emptyStyle);
+        N.group->SetGroupClipped(grp, 1);
+        N.art->SetArtUserAttr(dieCut, kArtIsClipMask, kArtIsClipMask);
+        N.art->SetArtBounds(dieCut);
+        N.art->SetArtBounds(grp);
+
+        ArtVecPushUnique(&createdGroups, grp);
+        created++;
+    }
+
+    /* 清理已搬空的原刀线编组 */
+    for (int g = 0; g < dieCutGroups.count; g++) {
+        DisposeIfEmptyGroup(dieCutGroups.items[g]);
+    }
+
+    N.match->DeselectAll();
+    for (int i = 0; i < createdGroups.count; i++) {
+        SelectArtRecursive(createdGroups.items[i]);
+    }
+    N.doc->RedrawDocument();
+
+    DWORD elapsed = GetTickCount() - t0;
+    if (lastErr != 0 && created == 0) {
+        SbAppendFmt(out, "{\"ok\":false,\"error\":\"批量蒙版失败（错误码 0x%08X）。\"}", (unsigned)lastErr);
+    } else if (created == 0) {
+        SbAppend(out, "{\"ok\":false,\"error\":\"没有刀线与内容对象存在重叠，未建立剪切蒙版。\"}");
+    } else {
+        SbAppend(out, "{\"ok\":true,\"data\":{");
+        SbAppendFmt(out, "\"count\":%d,\"skipped\":%d,\"duplicated\":%d,\"maskedItems\":%d,\"dieCutCount\":%d,\"elapsedMs\":%lu,\"usedMode\":",
+            created, skipped, duplicated, maskedItems, D, (unsigned long)elapsed);
+        SbAppendJsonStr(out, usedMode);
+        SbAppend(out, "}}");
+    }
+
+    free(cBoxes); free(cValid); free(hitCount); free(usedCount); free(mat); free(dieHits);
+    ArtVecFree(&createdGroups);
+    ArtVecFree(&topSel);
+    ArtVecFree(&dieCuts);
+    ArtVecFree(&dieCutGroups);
+    ArtVecFree(&contents);
+}
+
 /* ---------------- WM_COPYDATA 总入口 (运行于 Illustrator 主线程) ---------------- */
 
 YUNLI_NATIVE_API int __cdecl YunLiNativeHandleCopyData(const COPYDATASTRUCT *cds)
@@ -2074,6 +2721,8 @@ YUNLI_NATIVE_API int __cdecl YunLiNativeHandleCopyData(const COPYDATASTRUCT *cds
 
         if (strcmp(action, "splitInspect") == 0)           HandleSplitInspect(&out);
         else if (strcmp(action, "splitRun") == 0)          HandleSplitRun(reqJson, &out);
+        else if (strcmp(action, "batchMaskInspect") == 0)  HandleBatchMaskInspect(reqJson, &out);
+        else if (strcmp(action, "batchMaskRun") == 0)      HandleBatchMaskRun(reqJson, &out);
         else if (strcmp(action, "spotSelectInspect") == 0) HandleSpotSelectInspect(&out);
         else if (strcmp(action, "spotSelectRun") == 0)     HandleSpotSelectRun(reqJson, &out);
         else SbAppend(&out, "{\"ok\":false,\"error\":\"不支持的原生操作。\"}");

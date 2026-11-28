@@ -209,8 +209,8 @@ a.tool-entry:hover { background:var(--subtle); }
 .update-state.ok { color:var(--muted); }
 .update-state.err { color:var(--danger); }
 
-/* 图片分切与专色选择 */
-#view-split,#view-spotselect { --workspace-max:480px; }
+/* 图片分切、批量蒙版与专色选择 */
+#view-split,#view-batchmask,#view-spotselect { --workspace-max:480px; }
 .spot-sheet { width:100%; max-width:var(--workspace-max); margin-inline:auto; }
 .split-meta { margin:0; font-size:var(--text-caption); line-height:var(--line-caption); overflow-wrap:anywhere; }
 .spot-checks { margin-top:var(--item-gap); }
@@ -220,5 +220,5 @@ a.tool-entry:hover { background:var(--subtle); }
 .spot-cond-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--row-gap) var(--section-gap); }
 .inline-field { flex:none; flex-direction:row; align-items:center; gap:var(--control-gap); white-space:nowrap; }
 .inline-field input[inputmode] { flex:none; width:var(--number-width); max-width:var(--number-width); padding-inline:5px; }
-#ss-mode { flex:none; width:108px; padding:3px 22px 3px 9px; background-position:right 7px center; }
+#ss-mode,#bm-detect { flex:none; width:108px; padding:3px 22px 3px 9px; background-position:right 7px center; }
 .spot-scope-row { display:flex; flex-wrap:wrap; align-items:center; gap:var(--row-gap) var(--section-gap); }

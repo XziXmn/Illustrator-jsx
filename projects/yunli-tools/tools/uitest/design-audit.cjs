@@ -7,7 +7,7 @@ const root = path.resolve(__dirname, "../../dist/payload/assets/web");
 const shots = path.join(__dirname, "shots");
 const mock = fs.readFileSync(path.join(__dirname, "ui-preview.js"), "utf8");
 const sizes = [[272,400],[348,648],[360,560],[460,640],[500,700],[640,400],[640,520],[1280,800]];
-const surfaces = ["home","marks","export","split","spotselect","pdf","restore","overlay","merge"];
+const surfaces = ["home","marks","export","split","batchmask","spotselect","pdf","restore","overlay","merge"];
 const mime = { ".html":"text/html", ".css":"text/css", ".js":"text/javascript", ".png":"image/png", ".wasm":"application/wasm" };
 async function measure(page) {
   return page.evaluate(() => {
@@ -82,6 +82,8 @@ async function routeAssets(page) {
         await page.locator("#pdf-run").waitFor({state:"visible"});
       } else if (surface === "split") {
         await page.waitForFunction(() => !document.getElementById("split-run").disabled);
+      } else if (surface === "batchmask") {
+        await page.waitForFunction(() => !document.getElementById("bm-run").disabled);
       } else if (surface === "spotselect") {
         await page.waitForFunction(() => !document.getElementById("ss-run").disabled);
       } else await page.waitForFunction(() => !document.getElementById("marks-run").disabled);
@@ -90,7 +92,7 @@ async function routeAssets(page) {
       assert.equal(result.width,result.viewport,label + " 主区域宽度");
       assert.equal(result.homeItems,result.expectedItems,label + " 首页入口完整性");
       assert.equal(result.active,surface === "home" ? undefined : (font ? "fonts" : surface),label + " 当前导航");
-      assert.equal(result.heading,font ? "字体与文字" : {home:"工作台",marks:"印刷标记",export:"工艺导出",split:"图片分切",spotselect:"专色选择",pdf:"PDF 转曲"}[surface],label + " 页面标题");
+      assert.equal(result.heading,font ? "字体与文字" : {home:"工作台",marks:"印刷标记",export:"工艺导出",split:"图片分切",batchmask:"批量蒙版",spotselect:"专色选择",pdf:"PDF 转曲"}[surface],label + " 页面标题");
       assert.deepEqual(result.overflow,[],label + " 横向溢出");
       assert.deepEqual(result.badFields,[],label + " 控件裁剪或高度异常");
       assert.ok(result.footerVisible,label + " 操作栏可见");

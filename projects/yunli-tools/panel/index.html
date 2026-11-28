@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self'; object-src 'none'">
 <title>YunLi 工具箱</title>
-<link rel="stylesheet" href="style.css?v=30">
-<link rel="stylesheet" href="font/style.css?v=30">
+<link rel="stylesheet" href="style.css?v=31">
+<link rel="stylesheet" href="font/style.css?v=31">
 <script src="js/theme-boot.js"></script>
 </head>
 <body>
@@ -126,6 +126,29 @@
   </div>
   <div class="page-foot"><div class="page-actions"><p class="hint">原像素无损裁切</p><button id="split-run" class="primary" type="button" disabled>开始分切</button></div></div>
 </main>
+<main id="view-batchmask" class="page tool-page" aria-labelledby="batchmask-title" hidden>
+  <div class="page-scroll">
+    <header class="page-heading"><h1 id="batchmask-title">批量蒙版</h1></header>
+    <div class="sheet spot-sheet">
+      <div class="export-context">
+        <p id="bm-status" class="status" role="status" aria-live="polite">同时选中刀线与被蒙版对象。</p>
+        <button id="bm-refresh" class="icon-button" type="button" aria-label="刷新选区识别" title="刷新选区识别"></button>
+      </div>
+      <section class="zone">
+        <p id="bm-meta" class="hint split-meta">未识别到选区对象。</p>
+        <div class="rule"></div>
+        <div class="spot-cond-row">
+          <label class="field inline-field">刀线<select id="bm-detect" aria-label="刀线识别方式"><option value="auto">无填充优先</option><option value="top">最顶层对象</option></select></label>
+          <label class="field inline-field" title="正值外扩刀线范围，负值内缩刀线范围">容差<span class="input-unit"><input id="bm-tol" value="0" inputmode="decimal" aria-label="匹配容差"><span>mm</span></span></label>
+        </div>
+        <div class="stack spot-checks">
+          <label class="check" title="跳过覆盖范围内没有内容对象的刀线，保持原样不动"><input id="bm-skip" type="checkbox" checked>跳过无重叠刀线</label>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div class="page-foot"><div class="page-actions"><p class="hint">原位建立剪切蒙版</p><button id="bm-run" class="primary" type="button" disabled>开始蒙版</button></div></div>
+</main>
 <main id="view-spotselect" class="page tool-page" aria-labelledby="spotselect-title" hidden>
   <div class="page-scroll">
     <header class="page-heading"><h1 id="spotselect-title">专色选择</h1></header>
@@ -173,15 +196,15 @@
     <div data-id="boards" class="board-list"><p class="empty-state">连接文档后显示画板。</p></div>
   </section>
 </template>
-<script src="js/bridge.js?v=31"></script>
-<script src="js/tool-bridge.js?v=31"></script>
-<script src="js/nav.js?v=31"></script>
-<script src="js/update.js?v=31"></script>
-<script src="js/font-loader.js?v=31"></script>
-<script src="js/home.js?v=31"></script>
-<script src="js/export-preview.js?v=31"></script>
-<script src="js/tools.js?v=31"></script>
-<script src="js/pdf.js?v=31"></script>
-<script src="js/spot-tools.js?v=31"></script>
+<script src="js/bridge.js?v=32"></script>
+<script src="js/tool-bridge.js?v=32"></script>
+<script src="js/nav.js?v=32"></script>
+<script src="js/update.js?v=32"></script>
+<script src="js/font-loader.js?v=32"></script>
+<script src="js/home.js?v=32"></script>
+<script src="js/export-preview.js?v=32"></script>
+<script src="js/tools.js?v=32"></script>
+<script src="js/pdf.js?v=32"></script>
+<script src="js/spot-tools.js?v=32"></script>
 </body>
 </html>

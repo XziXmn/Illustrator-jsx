@@ -1,14 +1,14 @@
 {
-    "version":  "0.4.3",
-    "tag":  "yunli-v0.4.3",
+    "version":  "0.4.4",
+    "tag":  "yunli-v0.4.4",
     "asset":  "YunLiTools.aip",
-    "sha256":  "f30fc7bf8f7a781e4d3f178053acfd1a9d4bf28023e6635a2a02bade2d373ce1",
+    "sha256":  "bd566c79089ad93be5bd9a86c236ec7bd0d1afde083e99b47175004c915769be",
     "shellVersion":  2,
     "hot":  {
-                "asset":  "YunLiHot-0.4.3.zip",
-                "sha256":  "9dd962acf5b4225db559b3b8da70687a354b40cbb3aa205f9efc8c7eeddd304a",
+                "asset":  "YunLiHot-0.4.4.zip",
+                "sha256":  "c705ee95ec1d8f5523c0bbe842d9c65bec77ca36dea6983fa76c3faaee801167",
                 "minShell":  2
             },
-    "notes":  "修复嵌套剪切组/编组内复合路径无法选中的问题。",
-    "published":  "2026-11-26"
+    "notes":  "新增批量蒙版（按刀线覆盖范围原位建立剪切蒙版）与更新源防缓存。",
+    "published":  "2026-11-28"
 }

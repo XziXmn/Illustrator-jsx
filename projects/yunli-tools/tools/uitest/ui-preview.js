@@ -67,6 +67,12 @@
         applyMask: !!(message.payload.payload && message.payload.payload.applyMask),
         elapsedMs: 120, layer: "图片分切_烫金", spot: "烫金", colorSpace: "灰度(带透明)"
       });
+      if (action === "batchMaskInspect") return reply(message, {
+        dieCutCount: 12, contentCount: 14, matchedDieCuts: 12, sharedContents: 2, usedMode: "nofill"
+      });
+      if (action === "batchMaskRun") return reply(message, {
+        count: 12, skipped: 0, duplicated: 2, maskedItems: 16, dieCutCount: 12, elapsedMs: 85, usedMode: "nofill"
+      });
       if (action === "spotSelectInspect") return reply(message, {
         spots: ["烫金", "白墨", "PANTONE 1205 C"], selection: 1,
         sample: { spot: "烫金", percent: 50, where: "fill" }

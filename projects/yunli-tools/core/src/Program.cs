@@ -33,7 +33,7 @@ namespace YunLi.Core
 {
     internal static class Program
     {
-        public const string Version = "0.4.3";
+        public const string Version = "0.4.4";
 
         internal static string AipPath;
         internal static string HostPath;
@@ -877,9 +877,11 @@ namespace YunLi.Core
                         return;
                     }
                     if (toolAction == "splitInspect" || toolAction == "splitRun"
+                        || toolAction == "batchMaskInspect" || toolAction == "batchMaskRun"
                         || toolAction == "spotSelectInspect" || toolAction == "spotSelectRun")
                     {
-                        bool needNativeOnly = (toolAction == "splitInspect" || toolAction == "splitRun");
+                        bool needNativeOnly = (toolAction == "splitInspect" || toolAction == "splitRun"
+                            || toolAction == "batchMaskInspect" || toolAction == "batchMaskRun");
                         Task<object> nativeOrFallback;
                         if (NativeShellBridge.Available)
                         {
@@ -888,7 +890,7 @@ namespace YunLi.Core
                         else if (needNativeOnly)
                         {
                             TaskCompletionSource<object> tcs = new TaskCompletionSource<object>();
-                            tcs.SetException(new Exception("未连接到新版插件的原生无损裁切接口，请重启 Illustrator 加载最新 YunLiTools.aip 后重试。"));
+                            tcs.SetException(new Exception("未连接到新版插件的原生接口，请重启 Illustrator 加载最新 YunLiTools.aip 后重试。"));
                             nativeOrFallback = tcs.Task;
                         }
                         else

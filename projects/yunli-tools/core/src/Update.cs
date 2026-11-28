@@ -409,13 +409,14 @@ namespace YunLi.Core
         {
             string custom = Environment.GetEnvironmentVariable("YUNLI_UPDATE_MANIFEST");
             if (!string.IsNullOrEmpty(custom)) return new string[] { custom };
+            string bust = "?t=" + ((long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString(CultureInfo.InvariantCulture);
             return new string[] {
-                // 镜像优先;jsDelivr 会缓存分支内容,放后面避免读到旧清单。
-                "https://gh-proxy.com/" + RawBase,
-                "https://ghfast.top/" + RawBase,
-                "https://ghproxy.net/" + RawBase,
-                CdnBase,
-                RawBase
+                // 实时镜像优先并附带防缓存参数, 避免刚发版时命中边缘旧清单。
+                "https://ghfast.top/" + RawBase + bust,
+                "https://gh-proxy.com/" + RawBase + bust,
+                RawBase + bust,
+                CdnBase + bust,
+                "https://ghproxy.net/" + RawBase + bust
             };
         }
 
